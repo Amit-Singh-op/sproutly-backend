@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import { memberIds, requireMember, summaryFor } from '../core/conversations.js';
 import { SendBody, markWatermark, sendMessage } from '../core/messages.js';
 import { presenceAudience } from '../core/users.js';
+import { isApproved } from '../core/approval.js';
 import { one, q } from '../db/pool.js';
 import { rooms, toUsers } from '../lib/emitter.js';
 import { AppError } from '../lib/errors.js';
@@ -82,6 +83,8 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
     try {
       const token = (socket.handshake.auth as { token?: string } | undefined)?.token;
       socket.data.userId = await verifyAccess(token);
+      // Invite-only: no realtime (chat, presence) until the account is approved.
+      if (!(await isApproved(socket.data.userId))) return next(new Error('approval pending'));
       next();
     } catch {
       next(new Error('unauthorized: invalid token'));

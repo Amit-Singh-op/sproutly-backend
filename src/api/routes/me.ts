@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { q } from '../../db/pool.js';
 import { getMe, peersOf, userStyleOf, userStyles } from '../../core/users.js';
 import { registerDevice, report } from '../../core/misc.js';
+import { deleteAccount } from '../../core/account.js';
 import { toUsers } from '../../lib/emitter.js';
 import { isValidTimezone } from '../../lib/time.js';
 import { LIMITS } from '../../shared/rules.js';
@@ -31,6 +32,13 @@ export async function meRoutes(app: FastifyInstance) {
       if (style) toUsers([...(await peersOf(req.userId)), req.userId], 'style:update', style);
     }
     return getMe(req.userId);
+  });
+
+  /** In-app account deletion (Play requirement). Body must confirm, so a stray request can't wipe an account. */
+  app.delete('/me', async (req) => {
+    z.object({ confirm: z.literal('DELETE') }).parse(req.body ?? {});
+    await deleteAccount(req.userId);
+    return { ok: true };
   });
 
   app.post('/devices', async (req) => {

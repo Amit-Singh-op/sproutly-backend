@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import { config } from '../config.js';
 import { AppError } from '../lib/errors.js';
 import { getAppConfig } from '../core/appConfig.js';
+import { requireApproved } from '../core/approval.js';
 import { verifyAccess } from '../lib/jwt.js';
 import { log } from '../lib/log.js';
 import { authRoutes } from './routes/auth.js';
@@ -12,6 +13,7 @@ import { companionRoutes } from './routes/companion.js';
 import { meRoutes } from './routes/me.js';
 import { paymentRoutes } from './routes/payments.js';
 import { socialRoutes } from './routes/social.js';
+import { webRoutes } from './routes/web.js';
 
 declare module 'fastify' {
   interface FastifyRequest { userId: string }
@@ -21,6 +23,15 @@ declare module 'fastify' {
 export async function authenticate(req: FastifyRequest) {
   const h = req.headers.authorization;
   req.userId = await verifyAccess(h?.startsWith('Bearer ') ? h.slice(7) : null);
+}
+
+/** What a signed-in but not-yet-approved user may still do: see their status, delete their account, register push. */
+const PENDING_ALLOWED = new Set(['GET /v1/me', 'DELETE /v1/me', 'POST /v1/devices']);
+
+/** Invite-only gate: everything else needs an approved account (403 APPROVAL_PENDING). */
+async function approvalGate(req: FastifyRequest) {
+  if (PENDING_ALLOWED.has(`${req.method} ${req.routeOptions.url}`)) return;
+  await requireApproved(req.userId);
 }
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -42,6 +53,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.setNotFoundHandler((_req, reply) => reply.status(404).send({ code: 'NOT_FOUND', message: 'Not found' }));
 
   app.get('/healthz', async () => ({ ok: true }));
+  // Public pages for the store listing (privacy, terms, account deletion).
+  await app.register(webRoutes);
 
   await app.register(async (v1) => {
     // Public: the app reads its feature switches before anyone signs in.
@@ -50,6 +63,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await v1.register(paymentRoutes);
     await v1.register(async (authed) => {
       authed.addHook('onRequest', authenticate);
+      authed.addHook('preHandler', approvalGate);
       await authed.register(meRoutes);
       await authed.register(chatRoutes);
       await authed.register(socialRoutes);

@@ -6,6 +6,7 @@ import { DEFAULT_CHAT_STYLE, initialsOf } from '../shared/rules.js';
 import { WALLPAPERS, type ChatStyle, type Companion, type Me, type Mood, type Outfit, type PaletteId, type Person, type UserStyle } from '../shared/types.js';
 import { getEntitlements } from './entitlements.js';
 import { ensureQuests } from './companion.js';
+import { isApproved } from './approval.js';
 
 const AVATAR_COLORS = ['#2B2340', '#D9543A', '#7A5AF8', '#2F8A6C', '#3D6FD1', '#A8741A'];
 
@@ -55,12 +56,12 @@ export async function getMe(userId: string): Promise<Me> {
     'SELECT id, handle, display_name, avatar_color, timezone, read_receipts FROM users WHERE id = $1', [userId],
   );
   if (!u) throw E.unauthorized();
-  const [companion, entitlements, style, quests] = await Promise.all([
-    getCompanion(userId), getEntitlements(userId), getChatStyle(userId), ensureQuests(userId),
+  const [companion, entitlements, style, quests, approved] = await Promise.all([
+    getCompanion(userId), getEntitlements(userId), getChatStyle(userId), ensureQuests(userId), isApproved(userId),
   ]);
   return {
     id: u.id, handle: u.handle, displayName: u.display_name, initials: initialsOf(u.display_name), avatarColor: u.avatar_color,
-    timezone: u.timezone, readReceipts: u.read_receipts, companion, entitlements, chatStyle: style.style, quests,
+    timezone: u.timezone, readReceipts: u.read_receipts, approved, companion, entitlements, chatStyle: style.style, quests,
   };
 }
 

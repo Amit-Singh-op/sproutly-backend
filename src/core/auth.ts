@@ -91,13 +91,15 @@ async function deliverOtp(login: string, code: string) {
 export async function startOtp(raw: string): Promise<{ ok: true; devCode?: string }> {
   const login = normalizeLogin(raw);
   await limit(`otp:${login}`, RATE_LIMITS.otpPerHour, 'Too many codes requested. Try again later.');
-  const code = config.otpDevCode ?? String(randomInt(0, 1_000_000)).padStart(6, '0');
+  // Store reviewers can't receive our emails: their one account uses the fixed code given to Google/Apple.
+  const isReview = !!config.REVIEW_EMAIL && !!config.REVIEW_CODE && login === normalizeLogin(config.REVIEW_EMAIL);
+  const code = isReview ? config.REVIEW_CODE! : config.otpDevCode ?? String(randomInt(0, 1_000_000)).padStart(6, '0');
   await q(
     `INSERT INTO otp_codes (login, code_hash, attempts, expires_at) VALUES ($1, $2, 0, $3)
      ON CONFLICT (login) DO UPDATE SET code_hash = EXCLUDED.code_hash, attempts = 0, expires_at = EXCLUDED.expires_at`,
     [login, sha256(`${login}:${code}`), new Date(Date.now() + OTP_TTL_MS)],
   );
-  await deliverOtp(login, code);
+  if (!isReview) await deliverOtp(login, code);
   return config.otpDevCode ? { ok: true, devCode: code } : { ok: true };
 }
 

@@ -198,6 +198,8 @@ export interface Me {
   avatarColor: string;
   timezone: string;
   readReceipts: boolean;
+  /** Invite-only: false until an admin approves the account (the app shows the waitlist screen). */
+  approved: boolean;
   companion: Companion;
   entitlements: Entitlements;
   chatStyle: ChatStyle;

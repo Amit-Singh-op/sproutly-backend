@@ -11,6 +11,9 @@ const Env = z.object({
   JWT_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   OTP_DEV_CODE: z.string().regex(/^\d{6}$/).optional(),
+  // Store review: ONE email that signs in with a fixed code (reviewers can't receive our emails). Off unless both set.
+  REVIEW_EMAIL: z.string().email().optional(),
+  REVIEW_CODE: z.string().regex(/^\d{6}$/).optional(),
   SMTP_URL: z.string().optional(),
   // Brevo transactional API key (xkeysib-...). When set, sign-in emails go over HTTPS instead of SMTP.
   BREVO_API_KEY: z.string().optional(),
