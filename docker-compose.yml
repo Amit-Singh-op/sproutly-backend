@@ -1,0 +1,52 @@
+# Local stack: Postgres + Redis for development and tests.
+# `docker compose up -d db redis` then `npm run migrate && npm run seed && npm run dev`.
+# `docker compose --profile app up --build` also runs the three services in containers.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sproutly
+      POSTGRES_PASSWORD: sproutly
+      POSTGRES_DB: sproutly
+    ports: ["5433:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sproutly"]
+      interval: 2s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    ports: ["6380:6379"]
+
+  api:
+    profiles: [app]
+    build: .
+    command: node dist/api/index.js
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://sproutly:sproutly@db:5432/sproutly
+      REDIS_URL: redis://redis:6379
+    ports: ["4000:4000"]
+    depends_on: { db: { condition: service_healthy }, redis: { condition: service_started } }
+  realtime:
+    profiles: [app]
+    build: .
+    command: node dist/realtime/index.js
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://sproutly:sproutly@db:5432/sproutly
+      REDIS_URL: redis://redis:6379
+    ports: ["4001:4001"]
+    depends_on: { db: { condition: service_healthy }, redis: { condition: service_started } }
+  worker:
+    profiles: [app]
+    build: .
+    command: node dist/worker/index.js
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://sproutly:sproutly@db:5432/sproutly
+      REDIS_URL: redis://redis:6379
+    depends_on: { db: { condition: service_healthy }, redis: { condition: service_started } }
+
+volumes:
+  pgdata:
