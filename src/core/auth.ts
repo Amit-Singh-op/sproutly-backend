@@ -30,9 +30,21 @@ export function normalizeLogin(raw: string): string {
 
 // ---------------- OTP delivery ----------------
 // Fail fast: a blocked or slow SMTP port must not hang the sign-in request.
-const mailer = config.SMTP_URL
-  ? nodemailer.createTransport(config.SMTP_URL, { connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 15_000 })
-  : null;
+// (Timeouts must be transport options; nodemailer's second createTransport argument is only message defaults.)
+function smtpTransport(raw: string) {
+  const u = new URL(raw);
+  const port = Number(u.port) || (u.protocol === 'smtps:' ? 465 : 587);
+  return nodemailer.createTransport({
+    host: u.hostname,
+    port,
+    secure: u.protocol === 'smtps:' || port === 465,
+    auth: u.username ? { user: decodeURIComponent(u.username), pass: decodeURIComponent(u.password) } : undefined,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 15_000,
+  });
+}
+const mailer = config.SMTP_URL ? smtpTransport(config.SMTP_URL) : null;
 
 /** "Name <addr@x>" -> { name, email } for the Brevo API. */
 function parseFrom(from: string): { name?: string; email: string } {
