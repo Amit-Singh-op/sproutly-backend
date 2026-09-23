@@ -6,7 +6,17 @@ pg.types.setTypeParser(20, (v) => Number(v));
 // DATE stays a 'YYYY-MM-DD' string (no timezone shifting).
 pg.types.setTypeParser(1082, (v) => v);
 
-export const pool = new pg.Pool({ connectionString: config.DATABASE_URL, max: 20 });
+export const pool = new pg.Pool({
+  connectionString: config.DATABASE_URL,
+  max: 20,
+  // Serverless Postgres (Neon) suspends when idle and drops connections; recycle idle ones before that happens,
+  // and give a cold start time to wake up instead of failing the first request.
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 15_000,
+});
+// An idle connection dropped by the server emits 'error' on the pool; unhandled, that crashes the process.
+// The pool discards the broken client and opens a fresh one on the next query.
+pool.on('error', (err) => { console.warn('[db] idle connection lost:', err.message); });
 
 export type Db = pg.Pool | pg.PoolClient;
 

@@ -4,7 +4,7 @@ import { log } from '../lib/log.js';
 import { createRealtime } from './server.js';
 
 const { io, httpServer } = createRealtime();
-httpServer.listen(config.RT_PORT, () => log.info(`realtime listening on :${config.RT_PORT}`));
+httpServer.listen(config.rtPort, () => log.info(`realtime listening on :${config.rtPort}`));
 
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {
   process.on(sig, async () => {

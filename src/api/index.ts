@@ -4,8 +4,8 @@ import { log } from '../lib/log.js';
 import { buildApp } from './app.js';
 
 const app = await buildApp();
-await app.listen({ port: config.API_PORT, host: '0.0.0.0' });
-log.info(`api listening on :${config.API_PORT}`);
+await app.listen({ port: config.apiPort, host: '0.0.0.0' });
+log.info(`api listening on :${config.apiPort}`);
 
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {
   process.on(sig, async () => {

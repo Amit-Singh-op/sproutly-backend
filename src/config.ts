@@ -1,4 +1,8 @@
+import { existsSync } from 'node:fs';
 import { z } from 'zod';
+
+// Local development reads .env; hosts like Render inject real env vars and have no file. Existing vars win.
+if (existsSync('.env')) process.loadEnvFile('.env');
 
 const Env = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -14,6 +18,8 @@ const Env = z.object({
   FCM_PROJECT_ID: z.string().optional(),
   APPLE_AUDIENCE: z.string().default('ai.sproutly.app'),
   GOOGLE_AUDIENCES: z.string().default(''),
+  // Render (and most hosts) tell each service which port to bind via PORT; it wins when set.
+  PORT: z.coerce.number().optional(),
   API_PORT: z.coerce.number().default(4000),
   RT_PORT: z.coerce.number().default(4001),
   CORS_ORIGINS: z.string().default('*'),
@@ -28,6 +34,8 @@ const e = parsed.data;
 
 export const config = {
   ...e,
+  apiPort: e.PORT ?? e.API_PORT,
+  rtPort: e.PORT ?? e.RT_PORT,
   isProd: e.NODE_ENV === 'production',
   // The dev OTP is never honoured in production, even if set.
   otpDevCode: e.NODE_ENV === 'production' ? undefined : e.OTP_DEV_CODE,

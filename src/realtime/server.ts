@@ -64,7 +64,13 @@ function wrap<T>(fn: () => Promise<T>) {
   });
 }
 
-export function createRealtime(httpServer: HttpServer = createServer()) {
+/** Plain HTTP health check for the host (Render pings it); Socket.IO handles everything under /socket.io. */
+const healthServer = () => createServer((req, res) => {
+  if (req.url === '/healthz') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); return; }
+  if (!req.url?.startsWith('/socket.io')) { res.writeHead(404); res.end(); }
+});
+
+export function createRealtime(httpServer: HttpServer = healthServer()) {
   const io = new Server(httpServer, {
     cors: { origin: config.CORS_ORIGINS === '*' ? true : config.CORS_ORIGINS.split(',') },
     pingInterval: HEARTBEAT_MS,
