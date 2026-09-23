@@ -6,6 +6,7 @@
  */
 import { config } from './config.js';
 import { pool } from './db/pool.js';
+import { startKeepAlive } from './lib/keepalive.js';
 import { log } from './lib/log.js';
 import { buildApp } from './api/app.js';
 import { createRealtime } from './realtime/server.js';
@@ -15,6 +16,7 @@ const app = await buildApp();
 const { io } = createRealtime(app.server);
 await app.listen({ port: config.apiPort, host: '0.0.0.0' });
 log.info(`api + realtime listening on :${config.apiPort}`);
+startKeepAlive();
 
 await import('./worker/index.js');
 

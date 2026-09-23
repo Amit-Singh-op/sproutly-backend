@@ -3,6 +3,7 @@ import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyRequ
 import { ZodError } from 'zod';
 import { config } from '../config.js';
 import { AppError } from '../lib/errors.js';
+import { getAppConfig } from '../core/appConfig.js';
 import { verifyAccess } from '../lib/jwt.js';
 import { log } from '../lib/log.js';
 import { authRoutes } from './routes/auth.js';
@@ -43,6 +44,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.get('/healthz', async () => ({ ok: true }));
 
   await app.register(async (v1) => {
+    // Public: the app reads its feature switches before anyone signs in.
+    v1.get('/config', async () => getAppConfig());
     await v1.register(authRoutes);
     await v1.register(paymentRoutes);
     await v1.register(async (authed) => {
