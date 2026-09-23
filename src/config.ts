@@ -12,6 +12,8 @@ const Env = z.object({
   JWT_REFRESH_SECRET: z.string().min(32),
   OTP_DEV_CODE: z.string().regex(/^\d{6}$/).optional(),
   SMTP_URL: z.string().optional(),
+  // Brevo transactional API key (xkeysib-...). When set, sign-in emails go over HTTPS instead of SMTP.
+  BREVO_API_KEY: z.string().optional(),
   OTP_FROM: z.string().default('Sproutly <no-reply@sproutly.app>'),
   REVENUECAT_WEBHOOK_AUTH: z.string().min(8),
   REVENUECAT_SECRET_KEY: z.string().optional(),
