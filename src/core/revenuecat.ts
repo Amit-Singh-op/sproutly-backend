@@ -45,7 +45,7 @@ async function resolveUser(ev: Pick<RcEvent, 'app_user_id' | 'original_app_user_
   return null;
 }
 
-const touchesPlus = (ev: RcEvent) => !ev.entitlement_ids || ev.entitlement_ids.length === 0 || ev.entitlement_ids.includes(PRODUCTS.entitlement);
+const touchesPlus = (ev: RcEvent) => !ev.entitlement_ids || ev.entitlement_ids.length === 0 || ev.entitlement_ids.some(id => /plus|pro/i.test(id));
 
 function stateFromEvent(ev: RcEvent): SubscriptionState {
   const now = Date.now();
@@ -168,7 +168,7 @@ export async function syncFromRevenueCat(userId: string) {
   });
   if (!res.ok) throw E.unavailable('PURCHASES_UNAVAILABLE', `RevenueCat returned ${res.status}`);
   const data = Subscriber.parse(await res.json());
-  const ent = data.subscriber.entitlements[PRODUCTS.entitlement];
+  const ent = data.subscriber.entitlements[PRODUCTS.entitlement] ?? data.subscriber.entitlements['sproutly_pro'] ?? Object.values(data.subscriber.entitlements)[0];
   const now = Date.now();
   let state: SubscriptionState;
   if (!ent) {
