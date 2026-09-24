@@ -26,7 +26,7 @@ export async function authenticate(req: FastifyRequest) {
 }
 
 /** What a signed-in but not-yet-approved user may still do: see their status, delete their account, register push. */
-const PENDING_ALLOWED = new Set(['GET /v1/me', 'DELETE /v1/me', 'POST /v1/devices']);
+const PENDING_ALLOWED = new Set(['GET /v1/me', 'PATCH /v1/me', 'DELETE /v1/me', 'POST /v1/devices']);
 
 /** Invite-only gate: everything else needs an approved account (403 APPROVAL_PENDING). */
 async function approvalGate(req: FastifyRequest) {

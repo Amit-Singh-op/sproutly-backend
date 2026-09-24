@@ -24,7 +24,37 @@ export async function createUser(c: pg.PoolClient, login: string, displayName: s
     [handle, login, name, color, timezone || 'UTC'], c,
   );
   await q(`INSERT INTO companions (user_id) VALUES ($1)`, [u!.id], c);
-  await q(`INSERT INTO entitlements (user_id, plus_active) VALUES ($1, FALSE)`, [u!.id], c);
+
+  // Check if this login has an active preserved subscription
+  const now = new Date();
+  const preserved = await one<{
+    product_id: string | null; status: string | null; period: 'monthly' | 'yearly' | null; trial: boolean;
+    current_period_end: Date | null; plus_since: Date | null; store: string | null;
+    will_renew: boolean; billing_issue_at: Date | null; last_event_ms: number; original_user_id: string;
+  }>(
+    `SELECT * FROM preserved_subscriptions
+      WHERE login = $1 AND (current_period_end IS NULL OR current_period_end > $2)`,
+    [login, now], c
+  );
+
+  if (preserved) {
+    await q(
+      `INSERT INTO subscriptions (
+         user_id, product_id, status, period, trial, current_period_end, plus_since,
+         store, will_renew, billing_issue_at, last_event_ms, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())`,
+      [
+        u!.id, preserved.product_id, preserved.status ?? 'active', preserved.period, preserved.trial,
+        preserved.current_period_end, preserved.plus_since ?? now, preserved.store,
+        preserved.will_renew, preserved.billing_issue_at, preserved.last_event_ms
+      ], c
+    );
+    await q(`INSERT INTO entitlements (user_id, plus_active) VALUES ($1, TRUE)`, [u!.id], c);
+    await q(`DELETE FROM preserved_subscriptions WHERE login = $1`, [login], c);
+  } else {
+    await q(`INSERT INTO entitlements (user_id, plus_active) VALUES ($1, FALSE)`, [u!.id], c);
+  }
+
   return u!.id;
 }
 

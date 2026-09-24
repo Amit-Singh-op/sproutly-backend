@@ -18,6 +18,52 @@ export async function deleteAccount(userId: string) {
   await tx(async (c) => {
     const exists = await one('SELECT 1 FROM users WHERE id = $1 FOR UPDATE', [userId], c);
     if (!exists) throw E.notFound('Account not found');
+
+    // Preserve active subscription so it can be reactivated if the user rejoins before it ends
+    const user = await one<{ login: string }>('SELECT login FROM users WHERE id = $1', [userId], c);
+    if (user) {
+      const sub = await one<{
+        product_id: string | null; status: string | null; period: 'monthly' | 'yearly' | null;
+        trial: boolean; current_period_end: Date | null; plus_since: Date | null;
+        store: string | null; will_renew: boolean; billing_issue_at: Date | null;
+        last_event_ms: number; plus_active: boolean;
+      }>(
+        `SELECT s.product_id, s.status, s.period, s.trial, s.current_period_end, s.plus_since,
+                s.store, s.will_renew, s.billing_issue_at, s.last_event_ms, COALESCE(e.plus_active, FALSE) AS plus_active
+           FROM subscriptions s
+           LEFT JOIN entitlements e ON e.user_id = s.user_id
+          WHERE s.user_id = $1`,
+        [userId], c
+      );
+      if (sub && (sub.plus_active || (sub.current_period_end && sub.current_period_end.getTime() > Date.now()))) {
+        await q(
+          `INSERT INTO preserved_subscriptions (
+             login, original_user_id, product_id, status, period, trial,
+             current_period_end, plus_since, store, will_renew, billing_issue_at, last_event_ms, updated_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+           ON CONFLICT (login) DO UPDATE SET
+             original_user_id = EXCLUDED.original_user_id,
+             product_id = EXCLUDED.product_id,
+             status = EXCLUDED.status,
+             period = EXCLUDED.period,
+             trial = EXCLUDED.trial,
+             current_period_end = EXCLUDED.current_period_end,
+             plus_since = EXCLUDED.plus_since,
+             store = EXCLUDED.store,
+             will_renew = EXCLUDED.will_renew,
+             billing_issue_at = EXCLUDED.billing_issue_at,
+             last_event_ms = EXCLUDED.last_event_ms,
+             updated_at = now()`,
+          [
+            user.login, userId, sub.product_id, sub.status, sub.period, sub.trial,
+            sub.current_period_end, sub.plus_since, sub.store, sub.will_renew,
+            sub.billing_issue_at, sub.last_event_ms
+          ],
+          c
+        );
+        log.info({ userId, login: user.login }, 'preserved active subscription before account deletion');
+      }
+    }
     await q(
       `UPDATE messages SET sender_id = NULL, body = NULL, payload = NULL, deleted_at = COALESCE(deleted_at, now())
         WHERE sender_id = $1`, [userId], c,

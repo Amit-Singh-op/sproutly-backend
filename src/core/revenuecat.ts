@@ -42,6 +42,16 @@ async function resolveUser(ev: Pick<RcEvent, 'app_user_id' | 'original_app_user_
   for (const id of candidates) {
     if (await one('SELECT 1 FROM users WHERE id = $1', [id])) return id;
   }
+  // Check if candidate was original_user_id of a preserved subscription where user rejoined
+  for (const id of candidates) {
+    const row = await one<{ id: string }>(
+      `SELECT u.id FROM users u
+         JOIN preserved_subscriptions p ON p.login = u.login
+        WHERE p.original_user_id = $1`,
+      [id]
+    );
+    if (row) return row.id;
+  }
   return null;
 }
 
