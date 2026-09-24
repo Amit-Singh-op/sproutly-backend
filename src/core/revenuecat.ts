@@ -182,6 +182,16 @@ export async function syncFromRevenueCat(userId: string) {
   const now = Date.now();
   let state: SubscriptionState;
   if (!ent) {
+    // Check if active subscription already in db
+    const cur = await one<{ plus_active: boolean; current_period_end: Date | null; period: 'monthly' | 'yearly' | null; product_id: string | null }>(
+      `SELECT e.plus_active, s.current_period_end, s.period, s.product_id
+         FROM entitlements e LEFT JOIN subscriptions s ON s.user_id = e.user_id
+        WHERE e.user_id = $1`,
+      [userId]
+    );
+    if (cur?.plus_active && cur.current_period_end && cur.current_period_end.getTime() > now) {
+      return getEntitlements(userId);
+    }
     state = { active: false, productId: null, period: null, status: 'none', trial: false, currentPeriodEnd: null, willRenew: false, billingIssueAt: null, store: null, purchasedAt: null };
   } else {
     const exp = ent.expires_date ? Date.parse(ent.expires_date) : null;

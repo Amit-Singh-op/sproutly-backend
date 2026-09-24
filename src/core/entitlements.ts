@@ -88,6 +88,9 @@ export async function applySubscription(userId: string, s: SubscriptionState, ev
        ON CONFLICT (user_id) DO UPDATE SET plus_active = EXCLUDED.plus_active, updated_at = now()`,
       [userId, s.active], c,
     );
+    if (s.active) {
+      await q(`UPDATE users SET approved = TRUE, approved_at = COALESCE(approved_at, now()) WHERE id = $1`, [userId], c);
+    }
     return cur.plus_active !== s.active;
   });
 
