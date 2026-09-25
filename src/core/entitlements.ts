@@ -3,7 +3,7 @@ import { toUser, toUsers } from '../lib/emitter.js';
 import { E } from '../lib/errors.js';
 import { enqueue } from '../lib/queues.js';
 import { redis } from '../lib/redis.js';
-import { isPlusMove, isPlusOutfit } from '../shared/rules.js';
+import { isPlusMove, isPlusOutfit, isPlusPalette } from '../shared/rules.js';
 import type { Entitlements } from '../shared/types.js';
 import { peersOf, userStyleOf } from './users.js';
 
@@ -102,7 +102,7 @@ export async function applySubscription(userId: string, s: SubscriptionState, ev
 
 /**
  * Doc section 4 "Downgrade" (and its inverse on upgrade). Runs in the entitlement-sync worker; safe to run twice.
- * - downgrade: Plus outfit -> none, Plus move -> wave, read_only in Plus-only groups, style stops applying.
+ * - downgrade: Plus character -> mo, Plus outfit -> none, Plus move -> wave, read_only in Plus-only groups, style stops applying.
  * - upgrade: lift read_only in Plus-only groups.
  * Both broadcast style:update to everyone who shares a conversation with the user.
  */
@@ -110,11 +110,12 @@ export async function applyPlusChange(userId: string, reason: 'upgrade' | 'downg
   if (reason === 'downgrade' && (await isPlus(userId))) return; // re-subscribed since the job was queued
   await tx(async (c) => {
     if (reason === 'downgrade') {
-      const comp = await one<{ equipped_outfit: string; signature_move: string }>('SELECT equipped_outfit, signature_move FROM companions WHERE user_id = $1', [userId], c);
+      const comp = await one<{ palette: string; equipped_outfit: string; signature_move: string }>('SELECT palette, equipped_outfit, signature_move FROM companions WHERE user_id = $1', [userId], c);
       if (comp) {
         await q(
-          `UPDATE companions SET equipped_outfit = $2, signature_move = $3, room_theme = 'basic', updated_at = now() WHERE user_id = $1`,
-          [userId, isPlusOutfit(comp.equipped_outfit) ? 'none' : comp.equipped_outfit, isPlusMove(comp.signature_move) ? 'wave' : comp.signature_move], c,
+          `UPDATE companions SET palette = $4, equipped_outfit = $2, signature_move = $3, room_theme = 'basic', updated_at = now() WHERE user_id = $1`,
+          [userId, isPlusOutfit(comp.equipped_outfit) ? 'none' : comp.equipped_outfit, isPlusMove(comp.signature_move) ? 'wave' : comp.signature_move,
+            isPlusPalette(comp.palette) ? 'mo' : comp.palette], c,
         );
       }
       await q(

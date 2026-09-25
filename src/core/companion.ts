@@ -1,11 +1,11 @@
 import type pg from 'pg';
 import { one, q, tx } from '../db/pool.js';
 import { toUser } from '../lib/emitter.js';
-import { E } from '../lib/errors.js';
+import { AppError, E } from '../lib/errors.js';
 import { enqueue } from '../lib/queues.js';
 import { dayDiff, localDay } from '../lib/time.js';
-import { applyEnergy, isPlusMove, isPlusOutfit } from '../shared/rules.js';
-import { ACTION_RULES, type ActionResult, type Companion, type CompanionAction, type Mood, type Outfit, type Quest } from '../shared/types.js';
+import { applyEnergy, isPlusMove, isPlusOutfit, isPlusPalette, outfitLevel, outfitName } from '../shared/rules.js';
+import { ACTION_RULES, type ActionResult, type Companion, type CompanionAction, type Mood, type Outfit, type PaletteId, type Quest } from '../shared/types.js';
 import { isPlus, requirePlus } from './entitlements.js';
 import { companionFromRow, getCompanion, peersOf, userStyleOf } from './users.js';
 import { toUsers } from '../lib/emitter.js';
@@ -72,7 +72,7 @@ async function progressQuest(c: pg.PoolClient, userId: string, key: string, plus
   return done ? row.reward * (plus ? 2 : 1) : 0;
 }
 
-async function grantEnergy(c: pg.PoolClient, userId: string, gain: number) {
+export async function grantEnergy(c: pg.PoolClient, userId: string, gain: number) {
   const comp = await one<{ level: number; energy: number }>('SELECT level, energy FROM companions WHERE user_id = $1 FOR UPDATE', [userId], c);
   const next = applyEnergy(comp!.level, comp!.energy, gain);
   await q('UPDATE companions SET level = $2, energy = $3, updated_at = now() WHERE user_id = $1', [userId, next.level, next.energy], c);
@@ -139,18 +139,25 @@ export async function recordMessageSent(senderId: string, recipientIds: string[]
   if (out.gained) toUser(senderId, 'quest:update', { quests: out.quests, energy: out.energy, level: out.level });
 }
 
-export async function patchCompanion(userId: string, p: { name?: string; equippedOutfit?: Outfit; signatureMove?: Mood }): Promise<Companion> {
+export async function patchCompanion(userId: string, p: { name?: string; palette?: PaletteId; equippedOutfit?: Outfit; signatureMove?: Mood }): Promise<Companion> {
+  if (p.palette && isPlusPalette(p.palette)) await requirePlus(userId, 'palette');
   if (p.equippedOutfit && isPlusOutfit(p.equippedOutfit)) await requirePlus(userId, 'outfit');
+  const needLevel = p.equippedOutfit ? outfitLevel(p.equippedOutfit) : 0;
+  if (needLevel) {
+    const lvl = (await one<{ level: number }>('SELECT level FROM companions WHERE user_id = $1', [userId]))?.level ?? 1;
+    if (lvl < needLevel) throw new AppError(403, 'LEVEL_REQUIRED', `${outfitName(p.equippedOutfit!)} unlocks at level ${needLevel}`, { level: needLevel });
+  }
   if (p.signatureMove && isPlusMove(p.signatureMove)) await requirePlus(userId, 'move');
   const sets: string[] = [];
   const vals: unknown[] = [userId];
   if (p.name !== undefined) { vals.push(p.name.trim().slice(0, 24) || 'Mo'); sets.push(`name = $${vals.length}`); }
+  if (p.palette !== undefined) { vals.push(p.palette); sets.push(`palette = $${vals.length}`); }
   if (p.equippedOutfit !== undefined) { vals.push(p.equippedOutfit); sets.push(`equipped_outfit = $${vals.length}`); }
   if (p.signatureMove !== undefined) { vals.push(p.signatureMove); sets.push(`signature_move = $${vals.length}`); }
   if (sets.length) {
     const r = await one<Parameters<typeof companionFromRow>[0]>(`UPDATE companions SET ${sets.join(', ')}, updated_at = now() WHERE user_id = $1 RETURNING *`, vals);
     // Outfit / palette show in other people's chats and rooms.
-    if (p.equippedOutfit !== undefined || p.signatureMove !== undefined) {
+    if (p.palette !== undefined || p.equippedOutfit !== undefined || p.signatureMove !== undefined) {
       const style = await userStyleOf(userId);
       if (style) toUsers([...(await peersOf(userId)), userId], 'style:update', style);
     }

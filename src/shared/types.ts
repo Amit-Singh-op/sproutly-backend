@@ -10,11 +10,16 @@ export const MOODS = [
 ] as const;
 export type Mood = (typeof MOODS)[number];
 
-export const OUTFITS = ['none', 'party', 'flower', 'scarf', 'wizard', 'shades', 'crown', 'aura'] as const;
+export const OUTFITS = ['none', 'party', 'flower', 'scarf', 'wizard', 'shades', 'crown', 'aura', 'headphones', 'cap', 'bandana'] as const;
 export type Outfit = (typeof OUTFITS)[number];
 
-export const PALETTE_IDS = ['mo', 'pip', 'blu'] as const;
+/** Also picks the character: drake and bolt are Plus-only. */
+export const PALETTE_IDS = ['mo', 'pip', 'blu', 'drake', 'bolt'] as const;
 export type PaletteId = (typeof PALETTE_IDS)[number];
+
+/** Facial expressions. The first six every character has (drawn its own way); the rest belong to one species. */
+export const EMOTES = ['smile', 'laugh', 'angry', 'sad', 'love', 'shock', 'bloom', 'shy', 'fire', 'smug', 'glitch', 'scan'] as const;
+export type Emote = (typeof EMOTES)[number];
 
 /** Home-screen actions. `dance` is Plus-only. */
 export const COMPANION_ACTIONS = ['pet', 'feed', 'play', 'nap', 'wake', 'dance'] as const;
@@ -52,6 +57,8 @@ export const STICKER_LABELS: Record<StickerKind, string> = { happy: 'Yay!', musi
 
 export interface StickerPayload {
   kind: StickerKind;
+  /** An emote sticker. `kind` is still set (as a fallback animation) for clients that predate emotes. */
+  emote?: Emote;
   snapshot: { palette: PaletteId; outfit: Outfit };
 }
 export interface PollPayload {
@@ -227,7 +234,7 @@ export interface Person { id: UUID; displayName: string; handle: string; avatarC
 
 export type SendInput =
   | { clientId: UUID; conversationId: UUID; type: 'text'; body: string }
-  | { clientId: UUID; conversationId: UUID; type: 'sticker'; payload: { kind: StickerKind } }
+  | { clientId: UUID; conversationId: UUID; type: 'sticker'; payload: { kind: StickerKind; emote?: Emote } }
   | { clientId: UUID; conversationId: UUID; type: 'poll'; payload: { question: string; options: string[] } };
 
 export type SendAck =
@@ -242,7 +249,43 @@ export interface ActionResult {
   mood: Mood; line: string; gain: number; energy: number; level: number; leveledUp: boolean; streak: number; quests: Quest[];
 }
 
+// ---------- guestbook ----------
+export const GUESTBOOK_STICKERS = ['wave', 'heart', 'flower', 'star'] as const;
+export type GuestbookSticker = (typeof GUESTBOOK_STICKERS)[number];
+export const GUESTBOOK_EMOJI: Record<GuestbookSticker, string> = { wave: '👋', heart: '💖', flower: '🌸', star: '⭐' };
+
+/** A visitor's note in someone's room. One per visitor per room per local day. */
+export interface GuestbookEntry {
+  id: UUID;
+  ownerId: UUID;
+  authorId: UUID;
+  authorName: string;
+  authorInitials: string;
+  authorColor: string;
+  palette: PaletteId;
+  sticker: GuestbookSticker;
+  note: string | null;
+  createdAt: string;
+}
+
+// ---------- daily drop ----------
+export type DropRarity = 'common' | 'rare' | 'epic';
+export interface DropReward { energy: number; rarity: DropRarity }
+
+/** One free gift per local day. Claiming on consecutive days walks a 7-day track; day 7 is always rare or better. */
+export interface DailyDrop {
+  available: boolean;
+  /** Next local midnight: when the next drop opens. */
+  nextAt: string;
+  /** Position on the 7-day track of the next claim (1..7). */
+  trackDay: number;
+  /** Today's reward once claimed. */
+  today: DropReward | null;
+}
+export interface DropClaim { drop: DailyDrop; reward: DropReward; energy: number; level: number; leveledUp: boolean }
+
 export interface ServiceEvents {
+  'guestbook:new': GuestbookEntry;
   'msg:new': Message;
   'msg:update': { id: UUID; conversationId: UUID; body?: string | null; editedAt?: string | null; deletedAt?: string | null };
   'receipt:update': { conversationId: UUID; userId: UUID; deliveredSeq: number; readSeq: number; minDeliveredSeq: number; minReadSeq: number };

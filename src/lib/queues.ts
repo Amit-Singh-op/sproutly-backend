@@ -26,7 +26,8 @@ export type PushJob =
   | { kind: 'message'; messageId: string }
   | { kind: 'cheer'; postId: string; fromUserId: string }
   | { kind: 'invite'; inviteId: string }
-  | { kind: 'level'; userId: string; level: number };
+  | { kind: 'level'; userId: string; level: number }
+  | { kind: 'guestbook'; entryId: string };
 export type QuestJob = { kind: 'message.sent'; messageId: string } | { kind: 'room.visit'; ownerId: string; visitorId: string };
 export type FanoutJob = { postId: string };
 export type EntitlementJob = { userId: string; reason: 'upgrade' | 'downgrade' };

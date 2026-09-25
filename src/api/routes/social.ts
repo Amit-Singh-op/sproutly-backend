@@ -1,7 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { currentEvent } from '../../core/conversations.js';
+import { getDrop, claimDrop } from '../../core/drops.js';
+import { listGuestbook, signGuestbook } from '../../core/guestbook.js';
 import { cheerRoom, getRoom, invite, respond } from '../../core/rooms.js';
+import { GUESTBOOK_STICKERS } from '../../shared/types.js';
+import { LIMITS } from '../../shared/rules.js';
 import { cheer, createPost, feed, getPost } from '../../core/showcase.js';
 import { addFriend, blockUser, friends, removeFriend, search } from '../../core/users.js';
 
@@ -39,4 +43,16 @@ export async function socialRoutes(app: FastifyInstance) {
     return { ok: true };
   });
   app.post('/rooms/:userId/cheer', async (req) => { await cheerRoom(req.userId, UserId.parse(req.params).userId); return { ok: true }; });
+
+  // Guestbook
+  app.get('/rooms/:userId/guestbook', async (req) => {
+    const raw = (req.params as { userId: string }).userId;
+    return listGuestbook(req.userId, raw === 'me' ? req.userId : UserId.parse(req.params).userId);
+  });
+  app.post('/rooms/:userId/guestbook', async (req) => signGuestbook(req.userId, UserId.parse(req.params).userId,
+    z.object({ sticker: z.enum(GUESTBOOK_STICKERS), note: z.string().max(LIMITS.guestbookNoteMax * 2).optional() }).parse(req.body)));
+
+  // Daily drop
+  app.get('/drops/today', async (req) => getDrop(req.userId));
+  app.post('/drops/today/claim', async (req) => claimDrop(req.userId));
 }

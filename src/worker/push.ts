@@ -4,7 +4,8 @@ import { one, q } from '../db/pool.js';
 import { log } from '../lib/log.js';
 import { isViewing } from '../lib/presence.js';
 import type { PushJob } from '../lib/queues.js';
-import { previewFor } from '../shared/rules.js';
+import { GUESTBOOK_EMOJI } from '../shared/types.js';
+import { LIMITS, previewFor } from '../shared/rules.js';
 import type { Message } from '../shared/types.js';
 
 const auth = config.FCM_PROJECT_ID ? new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/firebase.messaging'] }) : null;
@@ -93,6 +94,24 @@ export async function handlePush(job: PushJob) {
       'SELECT i.guest_id, i.host_id, u.display_name AS host_name FROM room_invites i JOIN users u ON u.id = i.host_id WHERE i.id = $1', [job.inviteId],
     );
     if (i) await sendToUser(i.guest_id, { title: 'Room invite', body: `${i.host_name} invited you to their room`, data: { type: 'room', userId: i.host_id } });
+    return;
+  }
+  if (job.kind === 'guestbook') {
+    const g = await one<{ owner_id: string; author_name: string; companion: string; sticker: keyof typeof GUESTBOOK_EMOJI; note: string | null; earlier: number }>(
+      `SELECT g.owner_id, a.display_name AS author_name, COALESCE(c.name, 'Mo') AS companion, g.sticker, g.note,
+              (SELECT count(*)::int FROM guestbook_entries x WHERE x.owner_id = g.owner_id AND x.id <> g.id AND x.created_at <= g.created_at
+                 AND (x.created_at AT TIME ZONE o.timezone)::date = (g.created_at AT TIME ZONE o.timezone)::date) AS earlier
+         FROM guestbook_entries g JOIN users a ON a.id = g.author_id JOIN users o ON o.id = g.owner_id LEFT JOIN companions c ON c.user_id = g.owner_id
+        WHERE g.id = $1 AND NOT g.hidden`, [job.entryId],
+    );
+    // Cap: the first few visits of the owner's day push; the rest only show in-app.
+    if (!g || g.earlier >= LIMITS.guestbookPushesPerDay) return;
+    await sendToUser(g.owner_id, {
+      title: `${g.author_name} visited ${g.companion}'s room`,
+      body: g.note ?? `left a ${GUESTBOOK_EMOJI[g.sticker]}`,
+      threadId: 'guestbook',
+      data: { type: 'guestbook', screen: 'room' },
+    });
     return;
   }
   if (job.kind === 'level') {

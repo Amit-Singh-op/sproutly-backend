@@ -4,9 +4,9 @@ import { companionAction, ensureQuests, patchCompanion } from '../../core/compan
 import { catalog, markSeen } from '../../core/misc.js';
 import { ChatStyleBody, getStyle, saveStyle } from '../../core/styles.js';
 import { getCompanion } from '../../core/users.js';
-import { COMPANION_ACTIONS, MOODS, OUTFITS } from '../../shared/types.js';
+import { COMPANION_ACTIONS, MOODS, OUTFITS, PALETTE_IDS } from '../../shared/types.js';
 
-const Patch = z.object({ name: z.string().max(24).optional(), equippedOutfit: z.enum(OUTFITS).optional(), signatureMove: z.enum(MOODS).optional() });
+const Patch = z.object({ name: z.string().max(24).optional(), palette: z.enum(PALETTE_IDS).optional(), equippedOutfit: z.enum(OUTFITS).optional(), signatureMove: z.enum(MOODS).optional() });
 
 export async function companionRoutes(app: FastifyInstance) {
   app.get('/companion', async (req) => getCompanion(req.userId));

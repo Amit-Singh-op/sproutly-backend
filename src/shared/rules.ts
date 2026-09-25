@@ -1,5 +1,5 @@
 /** Rules the app and server must agree on (doc section 1: `shared` + `catalog`). Mirrors sproutly/src/data/rules.ts. */
-import type { ChatStyle, Message, Mood, Outfit } from './types.js';
+import type { ChatStyle, Emote, Message, Mood, Outfit, PaletteId } from './types.js';
 
 export const LIMITS = {
   textMax: 4000,
@@ -17,6 +17,9 @@ export const LIMITS = {
   reportsToHide: 5,
   feedFanoutCap: 5000,
   userStylesMax: 200,
+  guestbookNoteMax: 80,
+  guestbookPreview: 20,
+  guestbookPushesPerDay: 3,
 } as const;
 
 export const RATE_LIMITS = {
@@ -41,7 +44,7 @@ export const periodForProduct = (productId: string | null | undefined): 'monthly
 };
 
 // ---------- catalog (plusOnly flags) ----------
-export const OUTFIT_ITEMS: { id: Outfit; name: string; plus: boolean }[] = [
+export const OUTFIT_ITEMS: { id: Outfit; name: string; plus: boolean; level?: number }[] = [
   { id: 'none', name: 'None', plus: false },
   { id: 'party', name: 'Party hat', plus: false },
   { id: 'flower', name: 'Flower crown', plus: false },
@@ -50,6 +53,9 @@ export const OUTFIT_ITEMS: { id: Outfit; name: string; plus: boolean }[] = [
   { id: 'shades', name: 'Cool shades', plus: true },
   { id: 'crown', name: 'Gold crown', plus: true },
   { id: 'aura', name: 'Glow aura', plus: true },
+  { id: 'headphones', name: 'Headphones', plus: true, level: 10 },
+  { id: 'cap', name: 'Street cap', plus: true, level: 20 },
+  { id: 'bandana', name: 'Bandana', plus: true, level: 30 },
 ];
 export const MOVE_ITEMS: { id: Mood; name: string; plus: boolean }[] = [
   { id: 'wave', name: 'Wave', plus: false },
@@ -75,6 +81,25 @@ export const THEME_ITEMS = [
 export const isPlusOutfit = (o: string) => OUTFIT_ITEMS.some((i) => i.id === o && i.plus);
 export const isPlusMove = (m: string) => MOVE_ITEMS.some((i) => i.id === m && i.plus);
 export const outfitName = (o: string) => OUTFIT_ITEMS.find((i) => i.id === o)?.name ?? 'None';
+/** Plus outfits that also need the companion to reach a level (0 = no level gate). */
+export const outfitLevel = (o: string) => OUTFIT_ITEMS.find((i) => i.id === o)?.level ?? 0;
+
+// ---------- characters & emotes ----------
+/** The palette also picks the character. drake and bolt are Plus-only. */
+export type Species = 'sprout' | 'drake' | 'bolt';
+const SPECIES: Record<PaletteId, Species> = { mo: 'sprout', pip: 'sprout', blu: 'sprout', drake: 'drake', bolt: 'bolt' };
+export const speciesOf = (p: string): Species => SPECIES[p as PaletteId] ?? 'sprout';
+export const isPlusPalette = (p: string) => p === 'drake' || p === 'bolt';
+
+const SHARED_EMOTES: Emote[] = ['smile', 'laugh', 'angry', 'sad', 'love', 'shock'];
+const OWN_EMOTES: Record<Species, Emote[]> = { sprout: ['bloom', 'shy'], drake: ['fire', 'smug'], bolt: ['glitch', 'scan'] };
+/** A companion can only use its own species' emotes. */
+export const emotesFor = (p: string): Emote[] => [...SHARED_EMOTES, ...OWN_EMOTES[speciesOf(p)]];
+
+// ---------- daily drop ----------
+export const DROP_ENERGY = { common: 25, rare: 60, epic: 150 } as const;
+export const DROP_ODDS = { common: 0.7, rare: 0.25, epic: 0.05 } as const;
+export const DROP_TRACK_DAYS = 7;
 
 // ---------- chat style: the exact 6 x 5 options ----------
 export const STYLE_OPTIONS = {

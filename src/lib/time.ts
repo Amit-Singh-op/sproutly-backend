@@ -15,3 +15,12 @@ export function dayDiff(a: string, b: string): number {
 export const isValidTimezone = (tz: string) => {
   try { new Intl.DateTimeFormat('en', { timeZone: tz }); return true; } catch { return false; }
 };
+
+/** The instant the user's next local day starts (ISO). Uses the current UTC offset, so it can be an hour off across a DST change. */
+export function nextLocalMidnight(timezone: string, at: Date = new Date()): string {
+  const wall = (tz: string) => Date.parse(at.toLocaleString('en-US', { timeZone: tz }));
+  let offset = 0;
+  try { offset = wall(timezone) - wall('UTC'); } catch { offset = 0; }
+  const [y, m, d] = localDay(timezone, at).split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + 1) - offset).toISOString();
+}

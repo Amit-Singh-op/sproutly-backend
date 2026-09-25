@@ -46,6 +46,11 @@ export async function chatRoutes(app: FastifyInstance) {
 
   app.get('/conversations/:id/receipts', async (req) => receipts(req.userId, Id.parse(req.params).id));
 
+  // REST fallbacks for the socket's msg:delivered / msg:read (app uses them while realtime is down).
+  app.post('/conversations/:id/delivered', async (req) => {
+    await markWatermark(req.userId, Id.parse(req.params).id, UpTo.parse(req.body).upToSeq, 'delivered');
+    return { ok: true };
+  });
   app.post('/conversations/:id/read', async (req) => {
     await markWatermark(req.userId, Id.parse(req.params).id, UpTo.parse(req.body).upToSeq, 'read');
     return { ok: true };

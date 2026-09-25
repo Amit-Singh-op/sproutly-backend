@@ -7,8 +7,8 @@ import { toUser, toUsers } from '../lib/emitter.js';
 import { E } from '../lib/errors.js';
 import { enqueue } from '../lib/queues.js';
 import { limit } from '../lib/ratelimit.js';
-import { LIMITS, RATE_LIMITS, cleanText, neutralPreview, previewFor } from '../shared/rules.js';
-import { STICKER_KINDS, type Message, type PollPayload, type SystemPayload } from '../shared/types.js';
+import { LIMITS, RATE_LIMITS, cleanText, emotesFor, neutralPreview, previewFor } from '../shared/rules.js';
+import { EMOTES, STICKER_KINDS, type Message, type PollPayload, type SystemPayload } from '../shared/types.js';
 import { isPlus } from './entitlements.js';
 import { memberIds, requireMember, summaryFor } from './conversations.js';
 
@@ -16,7 +16,7 @@ import { memberIds, requireMember, summaryFor } from './conversations.js';
 const Text = z.string().transform(cleanText).pipe(z.string().min(1, 'Message is empty').max(LIMITS.textMax, 'Message is too long'));
 export const SendBody = z.discriminatedUnion('type', [
   z.object({ clientId: z.string().uuid(), conversationId: z.string().uuid(), type: z.literal('text'), body: Text }),
-  z.object({ clientId: z.string().uuid(), conversationId: z.string().uuid(), type: z.literal('sticker'), payload: z.object({ kind: z.enum(STICKER_KINDS) }) }),
+  z.object({ clientId: z.string().uuid(), conversationId: z.string().uuid(), type: z.literal('sticker'), payload: z.object({ kind: z.enum(STICKER_KINDS), emote: z.enum(EMOTES).optional() }) }),
   z.object({
     clientId: z.string().uuid(), conversationId: z.string().uuid(), type: z.literal('poll'),
     payload: z.object({
@@ -122,8 +122,13 @@ export async function sendMessage(userId: string, input: SendBody): Promise<Mess
   const member = await requireMember(userId, input.conversationId);
   if (member.read_only) throw E.readOnly();
 
-  // Step 3: idempotency fast-path.
-  const dupe = await one<MessageRow>('SELECT * FROM messages WHERE sender_id = $1 AND client_id = $2', [userId, input.clientId]);
+  // Step 3: idempotency fast-path. The conversation kind and sender name are needed later; fetching them in the same
+  // round trip matters when the database is far away (each sequential query delays msg:new for every member).
+  const [dupe, conv, sender] = await Promise.all([
+    one<MessageRow>('SELECT * FROM messages WHERE sender_id = $1 AND client_id = $2', [userId, input.clientId]),
+    one<{ kind: 'dm' | 'group' }>('SELECT kind FROM conversations WHERE id = $1', [input.conversationId]),
+    one<{ display_name: string }>('SELECT display_name FROM users WHERE id = $1', [userId]),
+  ]);
   if (dupe) return (await toMessages([dupe], userId))[0]!;
 
   // Step 4: rate limits.
@@ -137,15 +142,15 @@ export async function sendMessage(userId: string, input: SendBody): Promise<Mess
     if (!(await isPlus(userId))) throw E.plusRequired('sticker');
     await limit(`sticker:u:${userId}`, RATE_LIMITS.stickerPerUser, 'Too many stickers, give it a second');
     const comp = await one<{ palette: string; equipped_outfit: string }>('SELECT palette, equipped_outfit FROM companions WHERE user_id = $1', [userId]);
-    payload = { kind: input.payload.kind, snapshot: { palette: comp?.palette ?? 'mo', outfit: comp?.equipped_outfit ?? 'none' } };
+    const palette = comp?.palette ?? 'mo';
+    // Emotes are per species: a drake can't send a bot's "glitch".
+    if (input.payload.emote && !emotesFor(palette).includes(input.payload.emote)) throw E.badRequest("Your companion doesn't have that emote");
+    payload = { kind: input.payload.kind, ...(input.payload.emote ? { emote: input.payload.emote } : {}), snapshot: { palette, outfit: comp?.equipped_outfit ?? 'none' } };
   } else if (input.type === 'poll') {
     payload = { question: input.payload.question, options: input.payload.options };
   } else {
     body = input.body;
   }
-
-  const conv = await one<{ kind: 'dm' | 'group' }>('SELECT kind FROM conversations WHERE id = $1', [input.conversationId]);
-  const sender = await one<{ display_name: string }>('SELECT display_name FROM users WHERE id = $1', [userId]);
 
   const row = await tx(async (c) => {
     const inserted = await insertMessage(c, { conversationId: input.conversationId, senderId: userId, clientId: input.clientId, type: input.type, body, payload });
@@ -161,8 +166,10 @@ export async function sendMessage(userId: string, input: SendBody): Promise<Mess
   const msg = (await toMessages([row], null))[0]!;
   await fanOut(msg, conv?.kind ?? 'group', sender?.display_name ?? '');
   // Step 10: jobs (ids derived from the message id => enqueueing twice is a no-op).
-  await enqueue.push(`push:${msg.id}`, { kind: 'message', messageId: msg.id });
-  await enqueue.quests(`quest:${msg.id}`, { kind: 'message.sent', messageId: msg.id });
+  await Promise.all([
+    enqueue.push(`push:${msg.id}`, { kind: 'message', messageId: msg.id }),
+    enqueue.quests(`quest:${msg.id}`, { kind: 'message.sent', messageId: msg.id }),
+  ]);
   return msg;
 }
 
