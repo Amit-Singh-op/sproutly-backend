@@ -10,7 +10,7 @@ import { presenceAudience } from '../core/users.js';
 import { isApproved } from '../core/approval.js';
 import { one, q } from '../db/pool.js';
 import { rooms, toUsers } from '../lib/emitter.js';
-import { AppError } from '../lib/errors.js';
+import { AppError, publicValidationMessage } from '../lib/errors.js';
 import { verifyAccess } from '../lib/jwt.js';
 import { log } from '../lib/log.js';
 import { dropPresence, isOnline, touchPresence, viewingKey } from '../lib/presence.js';
@@ -111,7 +111,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
         reply({ ok: true, id: msg.id, seq: msg.seq, createdAt: msg.createdAt, message: msg });
       } catch (err) {
         if (err instanceof AppError) reply({ ok: false, code: err.code, message: err.message });
-        else if (err instanceof z.ZodError) reply({ ok: false, code: 'BAD_REQUEST', message: err.issues[0]?.message ?? 'Invalid message' });
+        else if (err instanceof z.ZodError) reply({ ok: false, code: 'BAD_REQUEST', message: publicValidationMessage(err.issues) });
         else { log.error({ err }, 'msg:send failed'); reply({ ok: false, code: 'INTERNAL', message: 'Could not send' }); }
       }
     });

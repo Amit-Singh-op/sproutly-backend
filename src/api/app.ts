@@ -2,7 +2,7 @@ import cors from '@fastify/cors';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 import { config } from '../config.js';
-import { AppError } from '../lib/errors.js';
+import { AppError, GENERIC_MESSAGE, publicHttpMessage, publicValidationMessage } from '../lib/errors.js';
 import { getAppConfig } from '../core/appConfig.js';
 import { requireApproved } from '../core/approval.js';
 import { verifyAccess } from '../lib/jwt.js';
@@ -37,18 +37,35 @@ async function approvalGate(req: FastifyRequest) {
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, trustProxy: true, bodyLimit: 256 * 1024 });
   app.decorateRequest('userId', '');
+  // Treat an empty JSON body as "no body" instead of rejecting it: DELETE/POST requests without a payload that
+  // still send Content-Type: application/json (e.g. un-voting a poll from older app builds) must keep working.
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, raw, done) => {
+    const text = typeof raw === 'string' ? raw : raw.toString('utf8');
+    if (text.trim() === '') return done(null, undefined);
+    try { done(null, JSON.parse(text)); } catch {
+      const e = new Error('Invalid JSON') as Error & { statusCode: number };
+      e.statusCode = 400;
+      done(e, undefined);
+    }
+  });
   await app.register(cors, { origin: config.CORS_ORIGINS === '*' ? true : config.CORS_ORIGINS.split(',') });
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof AppError) return reply.status(err.status).send({ code: err.code, message: err.message, ...err.extra });
+    // Only AppErrors (our own wording) reach users verbatim. Validation and framework errors get a generic message;
+    // the technical detail goes to the logs instead.
     if (err instanceof ZodError) {
-      const first = err.issues[0];
-      return reply.status(400).send({ code: 'BAD_REQUEST', message: first ? `${first.path.join('.') || 'body'}: ${first.message}` : 'Invalid request' });
+      req.log.info({ issues: err.issues, url: req.url }, 'validation failed');
+      return reply.status(400).send({ code: 'BAD_REQUEST', message: publicValidationMessage(err.issues) });
     }
     const fe = err as { statusCode?: number; code?: string; message: string };
-    if (fe.statusCode && fe.statusCode < 500) return reply.status(fe.statusCode).send({ code: fe.code ?? 'BAD_REQUEST', message: fe.message });
+    if (fe.statusCode && fe.statusCode < 500) {
+      req.log.info({ code: fe.code, msg: fe.message, url: req.url }, 'request rejected');
+      return reply.status(fe.statusCode).send(publicHttpMessage(fe.statusCode));
+    }
     req.log.error({ err }, 'unhandled error');
-    return reply.status(500).send({ code: 'INTERNAL', message: 'Something went wrong' });
+    return reply.status(500).send({ code: 'INTERNAL', message: GENERIC_MESSAGE });
   });
   app.setNotFoundHandler((_req, reply) => reply.status(404).send({ code: 'NOT_FOUND', message: 'Not found' }));
 
