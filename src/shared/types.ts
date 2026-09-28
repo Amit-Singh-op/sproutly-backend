@@ -36,15 +36,88 @@ export const ACTION_RULES: Record<CompanionAction, { mood: Mood; gain: number; l
 
 export const ENERGY_PER_LEVEL = 1000;
 
+// ---------- catalog & inventory v2 ----------
+export const CATALOG_SLOTS = ['body', 'head', 'face', 'back', 'hand', 'colour', 'emote', 'trail', 'frame'] as const;
+export type CatalogSlot = (typeof CATALOG_SLOTS)[number];
+
+export const RARITIES = ['common', 'rare', 'epic', 'legendary', 'mythic'] as const;
+export type Rarity = (typeof RARITIES)[number];
+
+export const UNLOCK_METHODS = ['starter', 'level', 'streak', 'quest', 'egg', 'plus', 'reward', 'shop'] as const;
+export type UnlockMethod = (typeof UNLOCK_METHODS)[number];
+
+export interface CatalogItem {
+  id: string;
+  name: string;
+  slot: CatalogSlot;
+  rarity: Rarity;
+  unlockMethod: UnlockMethod;
+  unlockRequirement?: number | string;
+  plusOnly: boolean;
+  priceCoins?: number;
+  description?: string;
+  assetKey?: string;
+  owned?: boolean;
+  locked?: boolean;
+  isNew?: boolean;
+}
+
+export interface EquippedSlots {
+  body?: string;
+  head?: string;
+  face?: string;
+  back?: string;
+  hand?: string;
+  colour?: PaletteId;
+  emote?: Emote;
+  trail?: string;
+  frame?: string;
+}
+
+export interface UserInventoryItem {
+  itemId: string;
+  count: number;
+  source: UnlockMethod;
+  acquiredAt: string;
+  seen: boolean;
+}
+
+export interface CoinTransaction {
+  id: UUID;
+  userId: UUID;
+  amount: number;
+  balanceAfter: number;
+  source: string;
+  referenceId?: string;
+  createdAt: string;
+}
+
+export interface XpTransaction {
+  id: UUID;
+  userId: UUID;
+  amount: number;
+  source: 'message' | 'room_visit' | 'group_join' | 'daily_login' | 'quest' | 'invite' | 'companion_action';
+  day: string;
+  createdAt: string;
+}
+
 export interface Companion {
   name: string;
   palette: PaletteId;
   level: number;
   energy: number; // 0..999
+  coins: number;
   equippedOutfit: Outfit;
+  equippedSlots?: EquippedSlots;
   signatureMove: Mood;
   roomTheme: 'basic' | 'cabin';
   streak: number;
+}
+
+export interface AppConfig {
+  plusEnabled: boolean;
+  approvalRequired: boolean;
+  phaseFlags?: Record<string, boolean>;
 }
 
 // ---------- chat ----------
@@ -296,6 +369,7 @@ export interface ServiceEvents {
   'style:update': UserStyle;
   'me:entitlements': Entitlements;
   'quest:update': { quests: Quest[]; energy: number; level: number };
+  'wallet:update': { coins: number };
   'room:state': RoomState;
   connection: { connected: boolean };
 }

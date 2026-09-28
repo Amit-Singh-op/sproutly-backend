@@ -171,3 +171,12 @@ export function applyEnergy(level: number, energy: number, gain: number): { leve
 
 /** Strip control characters (keep newline + tab) and trim. */
 export const cleanText = (s: string) => s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim();
+
+// ---------- XP ledger daily caps (Phase 0) ----------
+export const XP_DAILY_CAPS: Record<string, { xpPerEvent: number; maxPerDay: number }> = {
+  message: { xpPerEvent: 2, maxPerDay: 100 },
+  room_visit: { xpPerEvent: 10, maxPerDay: 30 },
+  group_join: { xpPerEvent: 15, maxPerDay: 45 },
+  daily_login: { xpPerEvent: 25, maxPerDay: 25 },
+  companion_action: { xpPerEvent: 10, maxPerDay: 150 },
+};

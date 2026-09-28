@@ -1,19 +1,49 @@
 import { pool } from './pool.js';
 import { DECOR_ITEMS, MOVE_ITEMS, OUTFIT_ITEMS, THEME_ITEMS } from '../shared/rules.js';
+import { CATALOG_ITEMS } from '../shared/catalog.js';
 
 /** Idempotent reference data: catalog, the current event, and the public groups shown in Discover. */
 export async function seed() {
-  const items = [
+  const legacyItems = [
     ...OUTFIT_ITEMS.map((i, n) => ({ id: `outfit:${i.id}`, kind: 'outfit', name: i.name, plus: i.plus, sort: n })),
     ...MOVE_ITEMS.map((i, n) => ({ id: `move:${i.id}`, kind: 'move', name: i.name, plus: i.plus, sort: n })),
     ...DECOR_ITEMS.map((i, n) => ({ id: `decor:${i.id}`, kind: 'decor', name: i.name, plus: i.plus, sort: n })),
     ...THEME_ITEMS.map((i, n) => ({ id: `theme:${i.id}`, kind: 'theme', name: i.name, plus: i.plus, sort: n })),
   ];
-  for (const i of items) {
+  for (const i of legacyItems) {
     await pool.query(
       `INSERT INTO catalog_items (id, kind, name, plus_only, sort) VALUES ($1,$2,$3,$4,$5)
        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, plus_only = EXCLUDED.plus_only, sort = EXCLUDED.sort`,
       [i.id, i.kind, i.name, i.plus, i.sort],
+    );
+  }
+
+  for (const i of CATALOG_ITEMS) {
+    await pool.query(
+      `INSERT INTO catalog_items (id, kind, name, plus_only, sort, slot, rarity, unlock_method, unlock_requirement, price_coins, description)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (id) DO UPDATE SET
+         name = EXCLUDED.name,
+         plus_only = EXCLUDED.plus_only,
+         slot = EXCLUDED.slot,
+         rarity = EXCLUDED.rarity,
+         unlock_method = EXCLUDED.unlock_method,
+         unlock_requirement = EXCLUDED.unlock_requirement,
+         price_coins = EXCLUDED.price_coins,
+         description = EXCLUDED.description`,
+      [
+        i.id,
+        i.slot === 'head' || i.slot === 'body' || i.slot === 'face' ? 'outfit' : i.slot,
+        i.name,
+        i.plusOnly,
+        0,
+        i.slot,
+        i.rarity,
+        i.unlockMethod,
+        i.unlockRequirement ? String(i.unlockRequirement) : null,
+        i.priceCoins ?? null,
+        i.description ?? null,
+      ],
     );
   }
 
@@ -41,7 +71,7 @@ export async function seed() {
       [g.title, g.description, g.color, g.category, g.plus, g.plus ? 500 : 100],
     );
   }
-  console.log(`seeded ${items.length} catalog items, 1 event, ${groups.length} public groups`);
+  console.log(`seeded ${legacyItems.length + CATALOG_ITEMS.length} catalog items, 1 event, ${groups.length} public groups`);
 }
 
 if (process.argv[1]?.endsWith('seed.ts') || process.argv[1]?.endsWith('seed.js')) {

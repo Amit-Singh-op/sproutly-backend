@@ -5,7 +5,8 @@ import { AppError, E } from '../lib/errors.js';
 import { enqueue } from '../lib/queues.js';
 import { dayDiff, localDay } from '../lib/time.js';
 import { applyEnergy, isPlusMove, isPlusOutfit, isPlusPalette, outfitLevel, outfitName } from '../shared/rules.js';
-import { ACTION_RULES, type ActionResult, type Companion, type CompanionAction, type Mood, type Outfit, type PaletteId, type Quest } from '../shared/types.js';
+import { ACTION_RULES, type ActionResult, type Companion, type CompanionAction, type EquippedSlots, type Mood, type Outfit, type PaletteId, type Quest } from '../shared/types.js';
+import { primaryOutfitFromSlots, resolveEquippedSlots } from '../shared/catalog.js';
 import { isPlus, requirePlus } from './entitlements.js';
 import { companionFromRow, getCompanion, peersOf, userStyleOf } from './users.js';
 import { toUsers } from '../lib/emitter.js';
@@ -20,7 +21,7 @@ const QUEST_DEFS = (name: string) => [
 interface QuestRow { quest_key: string; title: string; target: number; progress: number; reward: number; completed_at: Date | null }
 const questFromRow = (r: QuestRow): Quest => ({ key: r.quest_key, title: r.title, reward: r.reward, target: r.target, progress: Math.min(r.progress, r.target), done: !!r.completed_at });
 
-async function userDay(userId: string, db?: pg.PoolClient) {
+export async function userDay(userId: string, db?: pg.PoolClient) {
   const u = await one<{ timezone: string }>('SELECT timezone FROM users WHERE id = $1', [userId], db);
   return localDay(u?.timezone ?? 'UTC');
 }
@@ -139,7 +140,7 @@ export async function recordMessageSent(senderId: string, recipientIds: string[]
   if (out.gained) toUser(senderId, 'quest:update', { quests: out.quests, energy: out.energy, level: out.level });
 }
 
-export async function patchCompanion(userId: string, p: { name?: string; palette?: PaletteId; equippedOutfit?: Outfit; signatureMove?: Mood }): Promise<Companion> {
+export async function patchCompanion(userId: string, p: { name?: string; palette?: PaletteId; equippedOutfit?: Outfit; equippedSlots?: Partial<EquippedSlots>; signatureMove?: Mood }): Promise<Companion> {
   if (p.palette && isPlusPalette(p.palette)) await requirePlus(userId, 'palette');
   if (p.equippedOutfit && isPlusOutfit(p.equippedOutfit)) await requirePlus(userId, 'outfit');
   const needLevel = p.equippedOutfit ? outfitLevel(p.equippedOutfit) : 0;
@@ -150,14 +151,30 @@ export async function patchCompanion(userId: string, p: { name?: string; palette
   if (p.signatureMove && isPlusMove(p.signatureMove)) await requirePlus(userId, 'move');
   const sets: string[] = [];
   const vals: unknown[] = [userId];
-  if (p.name !== undefined) { vals.push(p.name.trim().slice(0, 24) || 'Mo'); sets.push(`name = $${vals.length}`); }
-  if (p.palette !== undefined) { vals.push(p.palette); sets.push(`palette = $${vals.length}`); }
-  if (p.equippedOutfit !== undefined) { vals.push(p.equippedOutfit); sets.push(`equipped_outfit = $${vals.length}`); }
-  if (p.signatureMove !== undefined) { vals.push(p.signatureMove); sets.push(`signature_move = $${vals.length}`); }
+  if (p.name !== undefined) { vals.push(p.name.trim().slice(0, 24) || 'Mo'); sets.push(`name = ${vals.length}`); }
+  if (p.palette !== undefined) { vals.push(p.palette); sets.push(`palette = ${vals.length}`); }
+  if (p.equippedSlots !== undefined) {
+    vals.push(JSON.stringify(p.equippedSlots));
+    sets.push(`equipped_slots = ${vals.length}::jsonb`);
+    if (p.equippedOutfit === undefined) {
+      const primaryOutfit = primaryOutfitFromSlots(p.equippedSlots);
+      vals.push(primaryOutfit);
+      sets.push(`equipped_outfit = ${vals.length}`);
+    }
+  }
+  if (p.equippedOutfit !== undefined) {
+    vals.push(p.equippedOutfit);
+    sets.push(`equipped_outfit = ${vals.length}`);
+    if (p.equippedSlots === undefined) {
+      vals.push(JSON.stringify(resolveEquippedSlots(null, p.equippedOutfit)));
+      sets.push(`equipped_slots = ${vals.length}::jsonb`);
+    }
+  }
+  if (p.signatureMove !== undefined) { vals.push(p.signatureMove); sets.push(`signature_move = ${vals.length}`); }
   if (sets.length) {
     const r = await one<Parameters<typeof companionFromRow>[0]>(`UPDATE companions SET ${sets.join(', ')}, updated_at = now() WHERE user_id = $1 RETURNING *`, vals);
     // Outfit / palette show in other people's chats and rooms.
-    if (p.palette !== undefined || p.equippedOutfit !== undefined || p.signatureMove !== undefined) {
+    if (p.palette !== undefined || p.equippedOutfit !== undefined || p.equippedSlots !== undefined || p.signatureMove !== undefined) {
       const style = await userStyleOf(userId);
       if (style) toUsers([...(await peersOf(userId)), userId], 'style:update', style);
     }

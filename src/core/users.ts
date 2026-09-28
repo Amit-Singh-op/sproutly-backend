@@ -3,7 +3,8 @@ import { one, q, type Db } from '../db/pool.js';
 import { E } from '../lib/errors.js';
 import { onlineMap } from '../lib/presence.js';
 import { DEFAULT_CHAT_STYLE, initialsOf } from '../shared/rules.js';
-import { WALLPAPERS, type ChatStyle, type Companion, type Me, type Mood, type Outfit, type PaletteId, type Person, type UserStyle } from '../shared/types.js';
+import { WALLPAPERS, type ChatStyle, type Companion, type Me, type Mood, type Outfit, type PaletteId, type Person, type UserStyle, type EquippedSlots } from '../shared/types.js';
+import { resolveEquippedSlots } from '../shared/catalog.js';
 import { getEntitlements } from './entitlements.js';
 import { ensureQuests } from './companion.js';
 import { isApproved } from './approval.js';
@@ -58,11 +59,42 @@ export async function createUser(c: pg.PoolClient, login: string, displayName: s
   return u!.id;
 }
 
-interface CompanionRow { name: string; palette: PaletteId; level: number; energy: number; equipped_outfit: Outfit; signature_move: Mood; room_theme: 'basic' | 'cabin'; streak: number }
-export const companionFromRow = (r: CompanionRow): Companion => ({
-  name: r.name, palette: r.palette, level: r.level, energy: r.energy, equippedOutfit: r.equipped_outfit,
-  signatureMove: r.signature_move, roomTheme: r.room_theme, streak: r.streak,
-});
+interface CompanionRow {
+  name: string;
+  palette: PaletteId;
+  level: number;
+  energy: number;
+  coins?: number | null;
+  equipped_outfit: Outfit;
+  equipped_slots?: EquippedSlots | string | null;
+  signature_move: Mood;
+  room_theme: 'basic' | 'cabin';
+  streak: number;
+}
+export const companionFromRow = (r: CompanionRow): Companion => {
+  let equippedSlots: EquippedSlots | undefined = undefined;
+  if (r.equipped_slots) {
+    if (typeof r.equipped_slots === 'string') {
+      try {
+        equippedSlots = JSON.parse(r.equipped_slots);
+      } catch {}
+    } else if (typeof r.equipped_slots === 'object') {
+      equippedSlots = r.equipped_slots as EquippedSlots;
+    }
+  }
+  return {
+    name: r.name,
+    palette: r.palette,
+    level: r.level,
+    energy: r.energy,
+    coins: r.coins ?? 0,
+    equippedOutfit: r.equipped_outfit,
+    equippedSlots: equippedSlots ?? resolveEquippedSlots(null, r.equipped_outfit),
+    signatureMove: r.signature_move,
+    roomTheme: r.room_theme,
+    streak: r.streak,
+  };
+};
 
 export async function getCompanion(userId: string, db?: Db): Promise<Companion> {
   const r = await one<CompanionRow>('SELECT * FROM companions WHERE user_id = $1', [userId], db);
