@@ -6,7 +6,7 @@ import { getWallet } from '../../core/ledger.js';
 import { catalog, markSeen } from '../../core/misc.js';
 import { ChatStyleBody, getStyle, saveStyle } from '../../core/styles.js';
 import { getCompanion } from '../../core/users.js';
-import { CATALOG_SLOTS, COMPANION_ACTIONS, MOODS, OUTFITS, PALETTE_IDS, type CatalogSlot } from '../../shared/types.js';
+import { CATALOG_SLOTS, COMPANION_ACTIONS, MOODS, OUTFITS, PALETTE_IDS } from '../../shared/types.js';
 
 const Patch = z.object({
   name: z.string().max(24).optional(),

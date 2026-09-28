@@ -3,7 +3,7 @@ import { toUser } from '../lib/emitter.js';
 import { E } from '../lib/errors.js';
 import { enqueue } from '../lib/queues.js';
 import { XP_DAILY_CAPS } from '../shared/rules.js';
-import type { CoinTransaction, XpTransaction } from '../shared/types.js';
+import type { CoinTransaction } from '../shared/types.js';
 import { grantEnergy, userDay } from './companion.js';
 
 interface CoinTxRow {
@@ -45,6 +45,10 @@ export async function adjustCoins(
   referenceId?: string,
 ): Promise<{ coins: number; transactionId: string }> {
   const result = await tx(async (c) => {
+    // Lock the balance first: concurrent calls with the same referenceId then see each other's row instead of
+    // both passing the idempotency check and the loser failing on the unique constraint.
+    const comp = await one<{ coins: number }>('SELECT coins FROM companions WHERE user_id = $1 FOR UPDATE', [userId], c);
+    if (!comp) throw E.notFound('Companion not found');
     if (referenceId) {
       const existing = await one<{ id: string; balance_after: number }>(
         'SELECT id, balance_after FROM coin_transactions WHERE user_id = $1 AND reference_id = $2',
@@ -56,12 +60,7 @@ export async function adjustCoins(
       }
     }
 
-    const comp = await one<{ coins: number }>(
-      'SELECT coins FROM companions WHERE user_id = $1 FOR UPDATE',
-      [userId],
-      c,
-    );
-    const current = comp?.coins ?? 0;
+    const current = comp.coins;
     const next = current + amount;
     if (next < 0) {
       throw E.badRequest('Insufficient coins balance');
@@ -96,6 +95,8 @@ export async function grantXp(
   }
 
   const result = await tx(async (c) => {
+    // Serialise grants per user so parallel requests can't both read the same daily total and exceed the cap.
+    await one('SELECT 1 FROM companions WHERE user_id = $1 FOR UPDATE', [userId], c);
     const day = await userDay(userId, c);
 
     if (referenceId) {

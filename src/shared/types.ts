@@ -59,6 +59,7 @@ export interface CatalogItem {
   assetKey?: string;
   owned?: boolean;
   locked?: boolean;
+  lockReason?: 'plus' | 'level' | 'not_owned';
   isNew?: boolean;
 }
 

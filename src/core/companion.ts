@@ -1,13 +1,14 @@
 import type pg from 'pg';
 import { one, q, tx } from '../db/pool.js';
 import { toUser } from '../lib/emitter.js';
-import { AppError, E } from '../lib/errors.js';
+import { E } from '../lib/errors.js';
 import { enqueue } from '../lib/queues.js';
 import { dayDiff, localDay } from '../lib/time.js';
-import { applyEnergy, isPlusMove, isPlusOutfit, isPlusPalette, outfitLevel, outfitName } from '../shared/rules.js';
+import { applyEnergy, isPlusMove, isPlusPalette } from '../shared/rules.js';
 import { ACTION_RULES, type ActionResult, type Companion, type CompanionAction, type EquippedSlots, type Mood, type Outfit, type PaletteId, type Quest } from '../shared/types.js';
-import { primaryOutfitFromSlots, resolveEquippedSlots } from '../shared/catalog.js';
+import { slotOfOutfit } from '../shared/catalog.js';
 import { isPlus, requirePlus } from './entitlements.js';
+import { equipSlots } from './inventory.js';
 import { companionFromRow, getCompanion, peersOf, userStyleOf } from './users.js';
 import { toUsers } from '../lib/emitter.js';
 
@@ -142,35 +143,27 @@ export async function recordMessageSent(senderId: string, recipientIds: string[]
 
 export async function patchCompanion(userId: string, p: { name?: string; palette?: PaletteId; equippedOutfit?: Outfit; equippedSlots?: Partial<EquippedSlots>; signatureMove?: Mood }): Promise<Companion> {
   if (p.palette && isPlusPalette(p.palette)) await requirePlus(userId, 'palette');
-  if (p.equippedOutfit && isPlusOutfit(p.equippedOutfit)) await requirePlus(userId, 'outfit');
-  const needLevel = p.equippedOutfit ? outfitLevel(p.equippedOutfit) : 0;
-  if (needLevel) {
-    const lvl = (await one<{ level: number }>('SELECT level FROM companions WHERE user_id = $1', [userId]))?.level ?? 1;
-    if (lvl < needLevel) throw new AppError(403, 'LEVEL_REQUIRED', `${outfitName(p.equippedOutfit!)} unlocks at level ${needLevel}`, { level: needLevel });
+  // Anything that changes what Mo wears goes through equipSlots, which enforces Plus / level / ownership.
+  // (Writing these columns directly here let the legacy endpoint equip items the user doesn't have.)
+  if (p.equippedSlots !== undefined || p.equippedOutfit !== undefined) {
+    const slots: Record<string, string | null | undefined> = { ...(p.equippedSlots ?? {}) };
+    if (p.equippedOutfit !== undefined) {
+      if (p.equippedOutfit === 'none') {
+        const current = await getCompanion(userId);
+        if (current.equippedOutfit !== 'none') slots[slotOfOutfit(current.equippedOutfit)] = null;
+      } else {
+        slots[slotOfOutfit(p.equippedOutfit)] = p.equippedOutfit;
+      }
+    }
+    await equipSlots(userId, { slots: slots as Partial<EquippedSlots> });
+    p = { ...p, equippedSlots: undefined, equippedOutfit: undefined };
   }
   if (p.signatureMove && isPlusMove(p.signatureMove)) await requirePlus(userId, 'move');
   const sets: string[] = [];
   const vals: unknown[] = [userId];
-  if (p.name !== undefined) { vals.push(p.name.trim().slice(0, 24) || 'Mo'); sets.push(`name = ${vals.length}`); }
-  if (p.palette !== undefined) { vals.push(p.palette); sets.push(`palette = ${vals.length}`); }
-  if (p.equippedSlots !== undefined) {
-    vals.push(JSON.stringify(p.equippedSlots));
-    sets.push(`equipped_slots = ${vals.length}::jsonb`);
-    if (p.equippedOutfit === undefined) {
-      const primaryOutfit = primaryOutfitFromSlots(p.equippedSlots);
-      vals.push(primaryOutfit);
-      sets.push(`equipped_outfit = ${vals.length}`);
-    }
-  }
-  if (p.equippedOutfit !== undefined) {
-    vals.push(p.equippedOutfit);
-    sets.push(`equipped_outfit = ${vals.length}`);
-    if (p.equippedSlots === undefined) {
-      vals.push(JSON.stringify(resolveEquippedSlots(null, p.equippedOutfit)));
-      sets.push(`equipped_slots = ${vals.length}::jsonb`);
-    }
-  }
-  if (p.signatureMove !== undefined) { vals.push(p.signatureMove); sets.push(`signature_move = ${vals.length}`); }
+  if (p.name !== undefined) { vals.push(p.name.trim().slice(0, 24) || 'Mo'); sets.push(`name = $${vals.length}`); }
+  if (p.palette !== undefined) { vals.push(p.palette); sets.push(`palette = $${vals.length}`); }
+  if (p.signatureMove !== undefined) { vals.push(p.signatureMove); sets.push(`signature_move = $${vals.length}`); }
   if (sets.length) {
     const r = await one<Parameters<typeof companionFromRow>[0]>(`UPDATE companions SET ${sets.join(', ')}, updated_at = now() WHERE user_id = $1 RETURNING *`, vals);
     // Outfit / palette show in other people's chats and rooms.

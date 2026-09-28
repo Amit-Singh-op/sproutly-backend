@@ -1,22 +1,10 @@
 import { one, q } from '../db/pool.js';
 import { toUsers } from '../lib/emitter.js';
 import { AppError, E } from '../lib/errors.js';
-import { CATALOG_ITEMS, getCatalogItem, primaryOutfitFromSlots, resolveEquippedSlots } from '../shared/catalog.js';
-import type { CatalogItem, CatalogSlot, Companion, EquippedSlots, Outfit, UserInventoryItem } from '../shared/types.js';
+import { CATALOG_ITEMS, getCatalogItem, itemAccess, primaryOutfitFromSlots, resolveEquippedSlots } from '../shared/catalog.js';
+import type { CatalogItem, CatalogSlot, Companion, EquippedSlots, UserInventoryItem } from '../shared/types.js';
 import { isPlus } from './entitlements.js';
 import { companionFromRow, getCompanion, peersOf, userStyleOf } from './users.js';
-
-interface CatalogDbRow {
-  id: string;
-  name: string;
-  slot: CatalogSlot;
-  rarity: string;
-  unlock_method: string;
-  unlock_requirement: string | null;
-  plus_only: boolean;
-  price_coins: number | null;
-  description: string | null;
-}
 
 interface InventoryDbRow {
   item_id: string;
@@ -44,19 +32,16 @@ export async function getCatalogItems(userId: string, slot?: CatalogSlot): Promi
     items = items.filter((i) => i.slot === slot);
   }
 
+  const ctx = { plus, level: userLevel, owned: new Set(invMap.keys()) };
   return items.map((item) => {
     const inv = invMap.get(item.id);
-    const reqLevel = typeof item.unlockRequirement === 'number' ? item.unlockRequirement : item.unlockRequirement ? parseInt(item.unlockRequirement, 10) : 0;
-    const isStarter = item.unlockMethod === 'starter';
-    const isOwned = isStarter || !!inv || (item.plusOnly && plus);
-    const isLocked = (item.plusOnly && !plus) || (reqLevel > 0 && userLevel < reqLevel);
-    const isNew = !!inv && !inv.seen;
-
+    const access = itemAccess(item, ctx);
     return {
       ...item,
-      owned: isOwned,
-      locked: isLocked,
-      isNew,
+      owned: access.owned,
+      locked: !access.owned,
+      lockReason: access.owned ? undefined : access.reason,
+      isNew: !!inv && !inv.seen,
     };
   });
 }
@@ -120,28 +105,20 @@ export async function equipSlots(
     }
   }
 
-  // Validate items
-  const inventoryRows = await q<{ item_id: string }>(
-    'SELECT item_id FROM user_inventory WHERE user_id = $1',
-    [userId],
-  );
-  const ownedItemIds = new Set(inventoryRows.map((r) => r.item_id));
-
+  // Validate only what this request changes: an item that was equipped before (e.g. one that used to be free)
+  // must not block changing a different slot.
+  const inventoryRows = await q<{ item_id: string }>('SELECT item_id FROM user_inventory WHERE user_id = $1', [userId]);
+  const ctx = { plus, level: comp.level, owned: new Set(inventoryRows.map((r) => r.item_id)) };
   for (const [slot, itemId] of Object.entries(newSlots)) {
-    if (!itemId || itemId === 'none') continue;
+    if (!itemId || itemId === 'none' || (currentSlots as Record<string, string | undefined>)[slot] === itemId) continue;
     const catItem = getCatalogItem(itemId);
-    if (catItem) {
-      if (catItem.plusOnly && !plus) {
-        throw E.plusRequired(catItem.name);
-      }
-      const reqLvl = typeof catItem.unlockRequirement === 'number' ? catItem.unlockRequirement : catItem.unlockRequirement ? parseInt(catItem.unlockRequirement, 10) : 0;
-      if (reqLvl > 0 && comp.level < reqLvl) {
-        throw new AppError(403, 'LEVEL_REQUIRED', `${catItem.name} unlocks at level ${reqLvl}`, { level: reqLvl });
-      }
-      if (catItem.unlockMethod !== 'starter' && !ownedItemIds.has(itemId) && !catItem.plusOnly) {
-        throw E.forbidden(`You do not own ${catItem.name}`);
-      }
-    }
+    if (!catItem) throw E.badRequest('Unknown item');
+    if (catItem.slot !== slot) throw E.badRequest(`${catItem.name} doesn't go in that slot`);
+    const access = itemAccess(catItem, ctx);
+    if (access.owned) continue;
+    if (access.reason === 'plus') throw E.plusRequired(catItem.name);
+    if (access.reason === 'level') throw new AppError(403, 'LEVEL_REQUIRED', `${catItem.name} unlocks at level ${access.level}`, { level: access.level });
+    throw new AppError(403, 'NOT_OWNED', `You don't own ${catItem.name} yet`);
   }
 
   const primaryOutfit = primaryOutfitFromSlots(newSlots as EquippedSlots);

@@ -1,4 +1,4 @@
-import type { CatalogItem, CatalogSlot, EquippedSlots, Outfit, PaletteId, Rarity } from './types.js';
+import type { CatalogItem, CatalogSlot, EquippedSlots, Outfit } from './types.js';
 import { OUTFITS } from './types.js';
 
 export const CATALOG_ITEMS: CatalogItem[] = [
@@ -57,6 +57,31 @@ const BY_ID = new Map<string, CatalogItem>(CATALOG_ITEMS.map((item) => [item.id,
 
 export function getCatalogItem(id: string): CatalogItem | undefined {
   return BY_ID.get(id);
+}
+
+/** Why an item can't be worn yet. */
+export type LockReason = 'plus' | 'level' | 'not_owned';
+export type ItemAccess = { owned: true } | { owned: false; reason: LockReason; level?: number; price?: number };
+
+/** Level an item needs (0 = none). */
+export function requiredLevel(item: CatalogItem): number {
+  const r = item.unlockRequirement;
+  const n = typeof r === 'number' ? r : r ? parseInt(r, 10) : 0;
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * The single ownership rule, used by the catalog listing, the equip endpoint and the Closet.
+ * Starter, Plus and level items are owned as soon as their gate is met (nothing needs granting);
+ * shop / reward / egg / quest / streak items are owned only once they're in the inventory.
+ */
+export function itemAccess(item: CatalogItem, ctx: { plus: boolean; level: number; owned: ReadonlySet<string> }): ItemAccess {
+  if (item.plusOnly && !ctx.plus) return { owned: false, reason: 'plus' };
+  const lvl = requiredLevel(item);
+  if (lvl > 0 && ctx.level < lvl) return { owned: false, reason: 'level', level: lvl };
+  if (item.unlockMethod === 'starter' || item.unlockMethod === 'plus' || item.unlockMethod === 'level') return { owned: true };
+  if (ctx.owned.has(item.id)) return { owned: true };
+  return { owned: false, reason: 'not_owned', ...(item.priceCoins ? { price: item.priceCoins } : {}) };
 }
 
 export function getCatalogBySlot(slot: CatalogSlot): CatalogItem[] {
