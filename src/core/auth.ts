@@ -9,6 +9,7 @@ import { log } from '../lib/log.js';
 import { limit } from '../lib/ratelimit.js';
 import { isValidTimezone } from '../lib/time.js';
 import { RATE_LIMITS } from '../shared/rules.js';
+import { otpEmail } from './emailTemplate.js';
 import { createUser } from './users.js';
 
 export interface Tokens { accessToken: string; refreshToken: string; expiresIn: number; isNew?: boolean }
@@ -47,12 +48,26 @@ const mailer = config.GMAIL_USER && config.GMAIL_APP_PASSWORD
 // Gmail rewrites any From address that isn't the account or a verified alias, so default to the account itself.
 const otpFrom = config.OTP_FROM ?? (config.GMAIL_USER ? `Sproutly <${config.GMAIL_USER}>` : undefined);
 
+/**
+ * Resend HTTPS API (port 443). Preferred when RESEND_API_KEY is set: hosts like Render's free tier block
+ * outbound SMTP ports, where the SMTP transport just times out. OTP_FROM must be on a domain verified in Resend.
+ */
+async function sendViaResend(to: string, subject: string, text: string, html: string) {
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${config.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from: otpFrom, to: [to], subject, text, html, ...(config.OTP_REPLY_TO && { reply_to: config.OTP_REPLY_TO }) }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!res.ok) throw new Error(`Resend API ${res.status}: ${(await res.text()).slice(0, 300)}`);
+}
+
 async function deliverOtp(login: string, code: string) {
-  const subject = `${code} is your Sproutly code`;
-  const text = `Your Sproutly sign-in code is ${code}. It expires in 10 minutes.`;
-  if (login.includes('@') && mailer) {
+  const { subject, text, html } = otpEmail(code);
+  if (login.includes('@') && (config.RESEND_API_KEY || mailer)) {
     try {
-      await mailer.sendMail({ from: otpFrom, to: login, subject, text });
+      if (config.RESEND_API_KEY) await sendViaResend(login, subject, text, html);
+      else await mailer!.sendMail({ from: otpFrom, to: login, subject, text, html, replyTo: config.OTP_REPLY_TO });
     } catch (err) {
       log.error({ err }, 'OTP email failed');
       throw E.unavailable('OTP_UNAVAILABLE', 'We couldn’t send the code right now. Please try again in a moment.');

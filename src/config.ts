@@ -17,8 +17,14 @@ const Env = z.object({
   // Sign-in emails go through Gmail SMTP. The password is a Google App Password (needs 2-Step Verification).
   GMAIL_USER: z.string().email().optional(),
   GMAIL_APP_PASSWORD: z.string().optional(),
-  // Defaults to "Sproutly <GMAIL_USER>"; any other address must be a verified "Send mail as" alias in Gmail.
+  // Resend API key (re_...). When set, sign-in emails go over HTTPS instead of SMTP (Render free tier blocks SMTP).
+  RESEND_API_KEY: z.string().optional(),
+  // With Resend: an address on your verified domain. With Gmail SMTP: defaults to "Sproutly <GMAIL_USER>".
   OTP_FROM: z.string().optional(),
+  // Where replies to sign-in emails go (e.g. a support inbox). Optional.
+  OTP_REPLY_TO: z.string().email().optional(),
+  // Public https URL of a square PNG logo (about 112x112) for emails. Without it, emails show a 🌱 badge.
+  EMAIL_LOGO_URL: z.string().url().optional(),
   REVENUECAT_WEBHOOK_AUTH: z.string().min(8),
   REVENUECAT_SECRET_KEY: z.string().optional(),
   FCM_PROJECT_ID: z.string().optional(),
@@ -31,7 +37,8 @@ const Env = z.object({
   CORS_ORIGINS: z.string().default('*'),
 });
 
-const parsed = Env.safeParse(process.env);
+// Blank values (e.g. "GMAIL_USER=") mean unset, not an invalid email/url.
+const parsed = Env.safeParse(Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== '')));
 if (!parsed.success) {
   console.error('Invalid environment:', parsed.error.flatten().fieldErrors);
   process.exit(1);
