@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { one, q, tx, type Db } from '../db/pool.js';
 import { toUser, toUsers } from '../lib/emitter.js';
 import { E } from '../lib/errors.js';
+import { log } from '../lib/log.js';
 import { enqueue } from '../lib/queues.js';
 import { limit } from '../lib/ratelimit.js';
 import { LIMITS, RATE_LIMITS, cleanText, emotesFor, neutralPreview, previewFor } from '../shared/rules.js';
@@ -165,6 +166,9 @@ export async function sendMessage(userId: string, input: SendBody): Promise<Mess
 
   const msg = (await toMessages([row], null))[0]!;
   await fanOut(msg, conv?.kind ?? 'group', sender?.display_name ?? '');
+  // Replying means the sender has read everything before it (afterInsert already moved their read_seq):
+  // push the new watermark so the other side's ticks turn blue instead of waiting for a reload.
+  void markWatermark(userId, msg.conversationId, msg.seq, 'read').catch((err) => log.warn({ err, conversationId: msg.conversationId }, 'receipt broadcast after send failed'));
   // Step 10: jobs (ids derived from the message id => enqueueing twice is a no-op).
   await Promise.all([
     enqueue.push(`push:${msg.id}`, { kind: 'message', messageId: msg.id }),

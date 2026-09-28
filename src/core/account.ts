@@ -2,8 +2,10 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { one, q, tx } from '../db/pool.js';
 import { AppError, E } from '../lib/errors.js';
 import { log } from '../lib/log.js';
+import { toUser, toUsers } from '../lib/emitter.js';
 import { redis } from '../lib/redis.js';
 import { normalizeLogin } from './auth.js';
+import { memberIds, summaryFor } from './conversations.js';
 
 /**
  * Deletes an account and its personal data (Google Play account-deletion requirement).
@@ -15,7 +17,7 @@ import { normalizeLogin } from './auth.js';
  * An active store subscription is NOT cancelled by this; the user must cancel it in Google Play / App Store.
  */
 export async function deleteAccount(userId: string) {
-  await tx(async (c) => {
+  const wiped = await tx(async (c) => {
     const exists = await one('SELECT 1 FROM users WHERE id = $1 FOR UPDATE', [userId], c);
     if (!exists) throw E.notFound('Account not found');
 
@@ -64,9 +66,9 @@ export async function deleteAccount(userId: string) {
         log.info({ userId, login: user.login }, 'preserved active subscription before account deletion');
       }
     }
-    await q(
+    const wipedRows = await q<{ id: string; conversation_id: string; deleted_at: Date }>(
       `UPDATE messages SET sender_id = NULL, body = NULL, payload = NULL, deleted_at = COALESCE(deleted_at, now())
-        WHERE sender_id = $1`, [userId], c,
+        WHERE sender_id = $1 RETURNING id, conversation_id, deleted_at`, [userId], c,
     );
     await q('UPDATE conversations SET owner_id = NULL WHERE owner_id = $1', [userId], c);
     await q(
@@ -75,9 +77,31 @@ export async function deleteAccount(userId: string) {
     );
     await q(`DELETE FROM reports WHERE target_type = 'user' AND target_id = $1`, [userId], c);
     await q('DELETE FROM users WHERE id = $1', [userId], c);
+    return wipedRows;
   });
   await redis.del(`ent:${userId}`, `presence-sockets:${userId}`).catch(() => {});
-  log.info({ userId }, 'account deleted');
+  log.info({ userId, wipedMessages: wiped.length }, 'account deleted');
+  await notifyWiped(wiped).catch((err) => log.warn({ err, userId }, 'failed to broadcast wiped messages'));
+}
+
+/**
+ * Tell everyone still in the affected chats that the deleted user's messages are gone, so open chats flip
+ * to "Message deleted" live and chat-list previews refresh. Offline clients reconcile when they reopen the chat.
+ */
+async function notifyWiped(rows: { id: string; conversation_id: string; deleted_at: Date }[]) {
+  const byConv = new Map<string, typeof rows>();
+  for (const r of rows) byConv.set(r.conversation_id, [...(byConv.get(r.conversation_id) ?? []), r]);
+  for (const [conversationId, msgs] of byConv) {
+    const members = await memberIds(conversationId);
+    if (members.length === 0) continue;
+    for (const m of msgs) {
+      toUsers(members, 'msg:update', { id: m.id, conversationId, body: null, deletedAt: m.deleted_at.toISOString() });
+    }
+    for (const uid of members) {
+      const s = await summaryFor(uid, conversationId);
+      if (s) toUser(uid, 'conv:update', { id: conversationId, lastSeq: s.lastSeq, lastMessagePreview: s.lastMessagePreview, lastMessageAt: s.lastMessageAt, unread: s.unread });
+    }
+  }
 }
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
