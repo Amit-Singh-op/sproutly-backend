@@ -14,10 +14,11 @@ const Env = z.object({
   // Store review: ONE email that signs in with a fixed code (reviewers can't receive our emails). Off unless both set.
   REVIEW_EMAIL: z.string().email().optional(),
   REVIEW_CODE: z.string().regex(/^\d{6}$/).optional(),
-  SMTP_URL: z.string().optional(),
-  // Brevo transactional API key (xkeysib-...). When set, sign-in emails go over HTTPS instead of SMTP.
-  BREVO_API_KEY: z.string().optional(),
-  OTP_FROM: z.string().default('Sproutly <no-reply@sproutly.app>'),
+  // Sign-in emails go through Gmail SMTP. The password is a Google App Password (needs 2-Step Verification).
+  GMAIL_USER: z.string().email().optional(),
+  GMAIL_APP_PASSWORD: z.string().optional(),
+  // Defaults to "Sproutly <GMAIL_USER>"; any other address must be a verified "Send mail as" alias in Gmail.
+  OTP_FROM: z.string().optional(),
   REVENUECAT_WEBHOOK_AUTH: z.string().min(8),
   REVENUECAT_SECRET_KEY: z.string().optional(),
   FCM_PROJECT_ID: z.string().optional(),

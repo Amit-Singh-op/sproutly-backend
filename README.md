@@ -35,5 +35,5 @@ The doc suggests a multi-package repo (`services/*`, `packages/*`). This is one 
 
 ## Not configured by default
 
-- **OTP delivery:** email via `SMTP_URL`. There is no SMS provider; in production, phone sign-in returns `OTP_UNAVAILABLE`. In development the code is logged and returned as `devCode` (`OTP_DEV_CODE`).
+- **OTP delivery:** email via Gmail SMTP (`GMAIL_USER` + `GMAIL_APP_PASSWORD`). There is no SMS provider; in production, phone sign-in returns `OTP_UNAVAILABLE`. In development the code is logged and returned as `devCode` (`OTP_DEV_CODE`).
 - **Push:** set `FCM_PROJECT_ID` + `GOOGLE_APPLICATION_CREDENTIALS`; otherwise pushes are logged, not sent.

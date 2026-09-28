@@ -29,50 +29,30 @@ export function normalizeLogin(raw: string): string {
 }
 
 // ---------------- OTP delivery ----------------
+// Gmail SMTP (smtp.gmail.com:465) authenticated with a Google App Password.
 // Fail fast: a blocked or slow SMTP port must not hang the sign-in request.
 // (Timeouts must be transport options; nodemailer's second createTransport argument is only message defaults.)
-function smtpTransport(raw: string) {
-  const u = new URL(raw);
-  const port = Number(u.port) || (u.protocol === 'smtps:' ? 465 : 587);
-  return nodemailer.createTransport({
-    host: u.hostname,
-    port,
-    secure: u.protocol === 'smtps:' || port === 465,
-    auth: u.username ? { user: decodeURIComponent(u.username), pass: decodeURIComponent(u.password) } : undefined,
-    connectionTimeout: 10_000,
-    greetingTimeout: 10_000,
-    socketTimeout: 15_000,
-  });
-}
-const mailer = config.SMTP_URL ? smtpTransport(config.SMTP_URL) : null;
-
-/** "Name <addr@x>" -> { name, email } for the Brevo API. */
-function parseFrom(from: string): { name?: string; email: string } {
-  const m = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(from);
-  return m ? { name: m[1] || undefined, email: m[2]! } : { email: from.trim() };
-}
-
-/**
- * Brevo's HTTPS API (port 443). Preferred when BREVO_API_KEY is set: hosts like Render's free tier block
- * outbound SMTP ports, where the SMTP transport would just time out.
- */
-async function sendViaBrevoApi(to: string, subject: string, text: string) {
-  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-    method: 'POST',
-    headers: { 'api-key': config.BREVO_API_KEY!, 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ sender: parseFrom(config.OTP_FROM), to: [{ email: to }], subject, textContent: text }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) throw new Error(`Brevo API ${res.status}: ${(await res.text()).slice(0, 300)}`);
-}
+const mailer = config.GMAIL_USER && config.GMAIL_APP_PASSWORD
+  ? nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      // App passwords are shown with spaces ("abcd efgh ..."); Google accepts them without.
+      auth: { user: config.GMAIL_USER, pass: config.GMAIL_APP_PASSWORD.replace(/\s+/g, '') },
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 15_000,
+    })
+  : null;
+// Gmail rewrites any From address that isn't the account or a verified alias, so default to the account itself.
+const otpFrom = config.OTP_FROM ?? (config.GMAIL_USER ? `Sproutly <${config.GMAIL_USER}>` : undefined);
 
 async function deliverOtp(login: string, code: string) {
   const subject = `${code} is your Sproutly code`;
   const text = `Your Sproutly sign-in code is ${code}. It expires in 10 minutes.`;
-  if (login.includes('@') && (config.BREVO_API_KEY || mailer)) {
+  if (login.includes('@') && mailer) {
     try {
-      if (config.BREVO_API_KEY) await sendViaBrevoApi(login, subject, text);
-      else await mailer!.sendMail({ from: config.OTP_FROM, to: login, subject, text });
+      await mailer.sendMail({ from: otpFrom, to: login, subject, text });
     } catch (err) {
       log.error({ err }, 'OTP email failed');
       throw E.unavailable('OTP_UNAVAILABLE', 'We couldn’t send the code right now. Please try again in a moment.');

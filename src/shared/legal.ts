@@ -21,7 +21,7 @@ export const PRIVACY: LegalDoc = {
     ['How we use it',
       'To run the app: sign you in, deliver your messages, show your companion and progress, send notifications you have not muted, apply your subscription, keep the service safe (rate limits, blocking, reports) and fix bugs. We do not sell your data and we do not show ads.'],
     ['Who we share it with',
-      'Only with services that run Sproutly for us, under their own privacy terms: Render (servers), Neon (database), Brevo (sign-in code emails), Google Firebase Cloud Messaging (push notifications), RevenueCat and Google Play / Apple App Store (subscriptions). Other Sproutly users see what you choose to share with them: your name, companion, messages in chats you are in, and your Showcase posts. We may disclose information if required by law.'],
+      'Only with services that run Sproutly for us, under their own privacy terms: Render (servers), Neon (database), Google (sign-in code emails), Google Firebase Cloud Messaging (push notifications), RevenueCat and Google Play / Apple App Store (subscriptions). Other Sproutly users see what you choose to share with them: your name, companion, messages in chats you are in, and your Showcase posts. We may disclose information if required by law.'],
     ['How long we keep it',
       'We keep your data while your account exists. When you delete your account we delete your profile, companion, friends, posts, sessions and devices. Messages you sent are wiped and shown to others as "Message deleted". Server logs are kept for up to 30 days. Copies in our providers\' backups expire on their normal schedules.'],
     ['Security',
