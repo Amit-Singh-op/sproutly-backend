@@ -8,9 +8,17 @@ import { GUESTBOOK_EMOJI } from '../shared/types.js';
 import { LIMITS, previewFor } from '../shared/rules.js';
 import type { Message } from '../shared/types.js';
 
-const auth = config.FCM_PROJECT_ID ? new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/firebase.messaging'] }) : null;
+const auth = config.FCM_PROJECT_ID
+  ? new GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/firebase.messaging'],
+    ...(config.FCM_SERVICE_ACCOUNT_JSON ? { credentials: JSON.parse(config.FCM_SERVICE_ACCOUNT_JSON) } : {}),
+  })
+  : null;
 
-interface Push { title: string; body: string; threadId?: string; data: Record<string, string> }
+/** Android notification channels the app creates (sproutly src/lib/push.ts). Unknown ids arrive silently. */
+const CHANNEL = { messages: 'messages', general: 'general' } as const;
+
+interface Push { title: string; body: string; threadId?: string; channel?: keyof typeof CHANNEL; data: Record<string, string> }
 
 async function totalUnread(userId: string): Promise<number> {
   const r = await one<{ n: number }>(
@@ -40,7 +48,7 @@ async function sendToUser(userId: string, p: Push) {
           token: d.push_token,
           notification: { title: p.title, body: p.body },
           data: p.data,
-          android: { collapse_key: p.threadId, notification: { tag: p.threadId, channel_id: 'default', notification_count: badge } },
+          android: { collapse_key: p.threadId, notification: { tag: p.threadId, channel_id: CHANNEL[p.channel ?? 'general'], sound: 'default', notification_count: badge } },
           apns: { payload: { aps: { 'thread-id': p.threadId, badge, sound: 'default' } } },
         },
       }),
@@ -76,6 +84,7 @@ export async function handlePush(job: PushJob) {
         title: m.kind === 'dm' ? sender : m.title ?? 'Group',
         body: m.kind === 'dm' && m.type !== 'sticker' ? text : `${sender}: ${text}`,
         threadId: m.conversation_id,
+        channel: 'messages',
         data: { type: 'message', conversationId: m.conversation_id, messageId: m.id },
       });
     }

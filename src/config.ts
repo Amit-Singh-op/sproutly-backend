@@ -28,6 +28,9 @@ const Env = z.object({
   REVENUECAT_WEBHOOK_AUTH: z.string().min(8),
   REVENUECAT_SECRET_KEY: z.string().optional(),
   FCM_PROJECT_ID: z.string().optional(),
+  // Firebase service-account key as raw JSON (paste the whole file into one env var). Alternative to
+  // GOOGLE_APPLICATION_CREDENTIALS pointing at a file, which is awkward on hosts like Render.
+  FCM_SERVICE_ACCOUNT_JSON: z.string().optional(),
   APPLE_AUDIENCE: z.string().default('ai.sproutly.app'),
   GOOGLE_AUDIENCES: z.string().default(''),
   // Render (and most hosts) tell each service which port to bind via PORT; it wins when set.

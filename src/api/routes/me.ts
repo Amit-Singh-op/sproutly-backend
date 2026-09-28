@@ -47,6 +47,13 @@ export async function meRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  // Sign-out: this phone stops getting the account's pushes.
+  app.post('/devices/remove', async (req) => {
+    const { pushToken } = z.object({ pushToken: z.string().min(10).max(4096) }).parse(req.body);
+    await q('DELETE FROM devices WHERE user_id = $1 AND push_token = $2', [req.userId, pushToken]);
+    return { ok: true };
+  });
+
   app.get('/users/styles', async (req) => {
     const ids = String((req.query as { ids?: string }).ids ?? '').split(',').map((s) => s.trim()).filter((s) => /^[0-9a-f-]{36}$/i.test(s));
     return userStyles([...new Set(ids)].slice(0, LIMITS.userStylesMax));
