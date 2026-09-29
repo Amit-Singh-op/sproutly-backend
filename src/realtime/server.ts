@@ -23,6 +23,16 @@ const ConvRef = z.object({ conversationId: z.string().uuid() });
 const Watermark = ConvRef.extend({ upToSeq: z.number().int().min(0) });
 const Hello = z.object({ conversations: z.array(z.object({ id: z.string().uuid(), maxSeq: z.number().int().min(0) })).max(50) });
 const OwnerRef = z.object({ ownerId: z.string().uuid() });
+const StageAction = z.object({
+  conversationId: z.string().uuid(),
+  action: z.enum(['walk', 'chair', 'jukebox', 'plant', 'coffee', 'nap', 'cheer', 'wave']),
+  targetX: z.number().optional(),
+  targetY: z.number().optional(),
+  isPlus: z.boolean().optional(),
+  avatarEffect: z.enum(['fire', 'water', 'sparkle', 'nature', 'lightning', 'hearts']).optional(),
+  avatarAnimation: z.enum(['float', 'bounce', 'spin', 'glide', 'zen']).optional(),
+});
+
 
 type S = Socket & { data: { userId: string; rooms: Set<string>; convs: Set<string> } };
 
@@ -156,6 +166,23 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
         const s = await summaryFor(userId, r.id);
         if (s) socket.emit('conv:update', { id: s.id, lastSeq: s.lastSeq, lastMessagePreview: s.lastMessagePreview, lastMessageAt: s.lastMessageAt, unread: s.unread, summary: s });
       }
+    }));
+
+    
+    // ---- avatar stage action sync ----
+    socket.on('stage:action', (p: unknown) => wrap(async () => {
+      const { conversationId, action, targetX, targetY, isPlus, avatarEffect, avatarAnimation } = StageAction.parse(p);
+      await requireMember(userId, conversationId);
+      io.to(rooms.conv(conversationId)).emit('stage:action', {
+        conversationId,
+        userId,
+        action,
+        targetX,
+        targetY,
+        isPlus,
+        avatarEffect,
+        avatarAnimation,
+      });
     }));
 
     // ---- companion rooms ----

@@ -18,6 +18,9 @@ export const ChatStyleBody = z.object({
   avatar: oneOf(STYLE_OPTIONS.avatar as unknown as [string, ...string[]]),
   animation: z.enum(STYLE_OPTIONS.animation),
   wallpaper: z.enum(STYLE_OPTIONS.wallpaper).default('lavender'),
+  avatarAnimation: z.enum(['float', 'bounce', 'spin', 'glide', 'zen']).optional(),
+  avatarEffect: z.enum(['fire', 'water', 'sparkle', 'nature', 'lightning', 'hearts']).optional(),
+  avatarCharm: z.enum(['crown', 'star', 'diamond', 'flame', 'lightning', 'sparkle']).optional(),
 });
 
 export async function getStyle(userId: string): Promise<ChatStyle> {

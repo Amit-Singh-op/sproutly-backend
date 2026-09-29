@@ -195,6 +195,15 @@ export type MessageAnimation = (typeof MESSAGE_ANIMATIONS)[number];
 export const WALLPAPERS = ['none', 'lavender', 'mint', 'peach', 'sky', 'cream', 'night'] as const;
 export type WallpaperId = (typeof WALLPAPERS)[number];
 
+export const AVATAR_ANIMATIONS = ['float', 'bounce', 'spin', 'glide', 'zen'] as const;
+export type AvatarAnimation = (typeof AVATAR_ANIMATIONS)[number];
+
+export const AVATAR_EFFECTS = ['fire', 'water', 'sparkle', 'nature', 'lightning', 'hearts'] as const;
+export type AvatarEffect = (typeof AVATAR_EFFECTS)[number];
+
+export const AVATAR_CHARMS = ['crown', 'star', 'diamond', 'flame', 'lightning', 'sparkle'] as const;
+export type AvatarCharm = (typeof AVATAR_CHARMS)[number];
+
 export interface ChatStyle {
   bubble: string;
   text: string;
@@ -358,6 +367,17 @@ export interface DailyDrop {
 }
 export interface DropClaim { drop: DailyDrop; reward: DropReward; energy: number; level: number; leveledUp: boolean }
 
+export interface AvatarStageAction {
+  conversationId: UUID;
+  userId: UUID;
+  action: 'walk' | 'chair' | 'jukebox' | 'plant' | 'coffee' | 'nap' | 'cheer' | 'wave';
+  targetX?: number;
+  targetY?: number;
+  isPlus?: boolean;
+  avatarEffect?: AvatarEffect;
+  avatarAnimation?: AvatarAnimation;
+}
+
 export interface ServiceEvents {
   'guestbook:new': GuestbookEntry;
   'msg:new': Message;
@@ -372,6 +392,7 @@ export interface ServiceEvents {
   'quest:update': { quests: Quest[]; energy: number; level: number };
   'wallet:update': { coins: number };
   'room:state': RoomState;
+  'stage:action': AvatarStageAction;
   connection: { connected: boolean };
 }
 export type EventName = keyof ServiceEvents;
