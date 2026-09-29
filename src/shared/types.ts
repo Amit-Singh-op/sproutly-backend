@@ -212,17 +212,23 @@ export interface ChatStyle {
   avatar: string;
   animation: MessageAnimation;
   wallpaper: WallpaperId;
+  /** Plus avatar-stage picks; unset means none chosen. */
+  avatarAnimation?: AvatarAnimation;
+  avatarEffect?: AvatarEffect;
+  avatarCharm?: AvatarCharm;
 }
 
 /** Everything a client needs to render another user's messages. */
 export interface UserStyle {
   userId: UUID;
   displayName: string;
+  handle?: string;
   initials: string;
   avatarColor: string;
+  avatarUrl?: string | null;
   isPlus: boolean;
   style: ChatStyle | null; // null => free styling
-  companion: { palette: PaletteId; outfit: Outfit; signatureMove: Mood };
+  companion: { palette: PaletteId; outfit: Outfit; level?: number; signatureMove: Mood };
   version: number;
 }
 
@@ -286,6 +292,7 @@ export interface Me {
   displayName: string;
   initials: string;
   avatarColor: string;
+  avatarUrl?: string | null;
   timezone: string;
   readReceipts: boolean;
   /** Invite-only: false until an admin approves the account (the app shows the waitlist screen). */
@@ -297,6 +304,15 @@ export interface Me {
 }
 
 // ---------- extra client-facing shapes (mirror docs/BACKEND.md) ----------
+export interface ConversationMemberInfo {
+  userId: UUID;
+  displayName: string;
+  avatarColor: string;
+  avatarUrl?: string | null;
+  online: boolean;
+  lastSeenAt: string | null;
+}
+
 export interface ConversationDetail {
   id: UUID;
   kind: 'dm' | 'group';
@@ -311,6 +327,8 @@ export interface ConversationDetail {
   plusOnly: boolean;
   readOnly: boolean;
   myReadSeq: number;
+  avatarUrl?: string | null;
+  members?: ConversationMemberInfo[];
 }
 
 export interface Person { id: UUID; displayName: string; handle: string; avatarColor: string; initials: string; online?: boolean }
@@ -378,6 +396,19 @@ export interface AvatarStageAction {
   avatarAnimation?: AvatarAnimation;
 }
 
+/** Someone currently inside a chat's avatar room and the last thing they did (targetX/Y are 0..1 of the floor). */
+export interface StageOccupant {
+  userId: UUID;
+  action?: AvatarStageAction['action'];
+  targetX?: number;
+  targetY?: number;
+  isPlus?: boolean;
+  avatarEffect?: AvatarEffect;
+  avatarAnimation?: AvatarAnimation;
+}
+/** Everyone in the room; sent whenever someone enters, leaves, or takes/leaves a seat. */
+export interface StagePresence { conversationId: UUID; occupants: StageOccupant[] }
+
 export interface ServiceEvents {
   'guestbook:new': GuestbookEntry;
   'msg:new': Message;
@@ -393,6 +424,7 @@ export interface ServiceEvents {
   'wallet:update': { coins: number };
   'room:state': RoomState;
   'stage:action': AvatarStageAction;
+  'stage:presence': StagePresence;
   connection: { connected: boolean };
 }
 export type EventName = keyof ServiceEvents;

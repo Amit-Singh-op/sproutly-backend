@@ -33,12 +33,13 @@ export async function saveStyle(userId: string, s: ChatStyle) {
     throw E.badRequest('Text is hard to read on that bubble. Pick a higher-contrast combination.', { field: 'text', minContrast: 4.5 });
   }
   await q(
-    `INSERT INTO chat_styles (user_id, bubble, text_color, border, design, avatar_color, animation, wallpaper, version, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1, now())
+    `INSERT INTO chat_styles (user_id, bubble, text_color, border, design, avatar_color, animation, wallpaper, avatar_animation, avatar_effect, avatar_charm, version, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,1, now())
      ON CONFLICT (user_id) DO UPDATE SET bubble = EXCLUDED.bubble, text_color = EXCLUDED.text_color, border = EXCLUDED.border,
        design = EXCLUDED.design, avatar_color = EXCLUDED.avatar_color, animation = EXCLUDED.animation, wallpaper = EXCLUDED.wallpaper,
+       avatar_animation = EXCLUDED.avatar_animation, avatar_effect = EXCLUDED.avatar_effect, avatar_charm = EXCLUDED.avatar_charm,
        version = chat_styles.version + 1, updated_at = now()`,
-    [userId, s.bubble, s.text, s.border, s.design, s.avatar, s.animation, s.wallpaper],
+    [userId, s.bubble, s.text, s.border, s.design, s.avatar, s.animation, s.wallpaper, s.avatarAnimation ?? null, s.avatarEffect ?? null, s.avatarCharm ?? null],
   );
   const style = await userStyleOf(userId);
   if (style) toUsers([...(await peersOf(userId)), userId], 'style:update', style);

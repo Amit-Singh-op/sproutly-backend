@@ -7,11 +7,14 @@ import { deleteAccount } from '../../core/account.js';
 import { toUsers } from '../../lib/emitter.js';
 import { isValidTimezone } from '../../lib/time.js';
 import { LIMITS } from '../../shared/rules.js';
+import { E } from '../../lib/errors.js';
+import { UPLOAD_FOLDERS, isOwnCloudinaryUrl, uploadSignature } from '../../lib/cloudinary.js';
 
 const PatchMe = z.object({
   displayName: z.string().trim().min(1).max(40).optional(),
   timezone: z.string().refine(isValidTimezone, 'Unknown timezone').optional(),
   readReceipts: z.boolean().optional(),
+  avatarUrl: z.string().url().max(500).nullable().optional(),
 });
 const Device = z.object({ platform: z.enum(['ios', 'android']), pushToken: z.string().min(10).max(4096), appVersion: z.string().max(40).optional() });
 const Report = z.object({ targetType: z.enum(['user', 'message', 'post']), targetId: z.string().uuid(), reason: z.string().min(1).max(500) });
@@ -26,12 +29,22 @@ export async function meRoutes(app: FastifyInstance) {
     if (p.displayName !== undefined) { vals.push(p.displayName); sets.push(`display_name = $${vals.length}`); }
     if (p.timezone !== undefined) { vals.push(p.timezone); sets.push(`timezone = $${vals.length}`); }
     if (p.readReceipts !== undefined) { vals.push(p.readReceipts); sets.push(`read_receipts = $${vals.length}`); }
+    if (p.avatarUrl !== undefined) {
+      if (p.avatarUrl !== null && !isOwnCloudinaryUrl(p.avatarUrl, req.userId)) throw E.badRequest('Upload the photo first, then save it.');
+      vals.push(p.avatarUrl); sets.push(`avatar_url = $${vals.length}`);
+    }
     if (sets.length) await q(`UPDATE users SET ${sets.join(', ')} WHERE id = $1`, vals);
-    if (p.displayName !== undefined) {
+    if (p.displayName !== undefined || p.avatarUrl !== undefined) {
       const style = await userStyleOf(req.userId);
       if (style) toUsers([...(await peersOf(req.userId)), req.userId], 'style:update', style);
     }
     return getMe(req.userId);
+  });
+
+  /** Signed params for a direct Cloudinary upload (see lib/cloudinary.ts). */
+  app.post('/uploads/signature', async (req) => {
+    const { folder } = z.object({ folder: z.enum(UPLOAD_FOLDERS).default('avatars') }).parse(req.body ?? {});
+    return uploadSignature(req.userId, folder);
   });
 
   /** In-app account deletion (Play requirement). Body must confirm, so a stray request can't wipe an account. */

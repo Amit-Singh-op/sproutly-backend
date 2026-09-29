@@ -16,7 +16,7 @@ import { log } from '../lib/log.js';
 import { dropPresence, isOnline, touchPresence, viewingKey } from '../lib/presence.js';
 import { redis } from '../lib/redis.js';
 import { LIMITS } from '../shared/rules.js';
-import type { RoomState, SendAck } from '../shared/types.js';
+import type { RoomState, SendAck, StageOccupant } from '../shared/types.js';
 
 const HEARTBEAT_MS = 25_000;
 const ConvRef = z.object({ conversationId: z.string().uuid() });
@@ -26,8 +26,9 @@ const OwnerRef = z.object({ ownerId: z.string().uuid() });
 const StageAction = z.object({
   conversationId: z.string().uuid(),
   action: z.enum(['walk', 'chair', 'jukebox', 'plant', 'coffee', 'nap', 'cheer', 'wave']),
-  targetX: z.number().optional(),
-  targetY: z.number().optional(),
+  // Fractions of the floor (0..1) so positions line up on every screen width.
+  targetX: z.number().min(0).max(1).optional(),
+  targetY: z.number().min(0).max(1).optional(),
   isPlus: z.boolean().optional(),
   avatarEffect: z.enum(['fire', 'water', 'sparkle', 'nature', 'lightning', 'hearts']).optional(),
   avatarAnimation: z.enum(['float', 'bounce', 'spin', 'glide', 'zen']).optional(),
@@ -62,6 +63,25 @@ async function roomState(ownerId: string): Promise<RoomState> {
     ownerId, night: flags.night === '1', music: flags.music === '1',
     visitors: Object.values(visitors).map((v) => JSON.parse(v) as RoomState['visitors'][number]),
   };
+}
+
+// ---------------- chat avatar rooms ----------------
+// stage:{conversationId} -> userId -> StageOccupant. Only people with the chat open are in it.
+const stageKey = (c: string) => `stage:${c}`;
+/** Seats one companion at a time; the rest (jukebox, plant, coffee) are shared spots. */
+const SEATS = new Set<StageOccupant['action']>(['chair', 'nap']);
+
+async function stageOccupants(conversationId: string): Promise<StageOccupant[]> {
+  const raw = await redis.hgetall(stageKey(conversationId));
+  const out: StageOccupant[] = [];
+  const stale: string[] = [];
+  await Promise.all(Object.entries(raw).map(async ([uid, v]) => {
+    // A crashed server never ran disconnect cleanup; presence keys expire on their own, so trust those.
+    if (!(await isOnline(uid))) { stale.push(uid); return; }
+    try { out.push(JSON.parse(v) as StageOccupant); } catch { stale.push(uid); }
+  }));
+  if (stale.length) await redis.hdel(stageKey(conversationId), ...stale);
+  return out;
 }
 
 async function broadcastPresence(userId: string, online: boolean) {
@@ -135,11 +155,17 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
       await socket.join(rooms.conv(conversationId));
       socket.data.convs.add(conversationId);
       await redis.hset(viewingKey(conversationId), userId, socket.id);
+      // Enter the chat's avatar room (keeping a spot held from another device) and tell everyone who's here.
+      const key = stageKey(conversationId);
+      if (!(await redis.hexists(key, userId))) await redis.hset(key, userId, JSON.stringify({ userId } satisfies StageOccupant));
+      await redis.expire(key, 24 * 60 * 60);
+      await emitStage(conversationId);
     }));
     socket.on('conv:leave', (p: unknown) => wrap(async () => {
       const { conversationId } = ConvRef.parse(p);
       await socket.leave(rooms.conv(conversationId));
       socket.data.convs.delete(conversationId);
+      await leaveStage(conversationId);
       await redis.hdel(viewingKey(conversationId), userId);
       await setTyping(userId, conversationId, false);
     }));
@@ -169,10 +195,36 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
     }));
 
     
-    // ---- avatar stage action sync ----
+    // ---- chat avatar room ----
+    const emitStage = async (conversationId: string) => {
+      io.to(rooms.conv(conversationId)).emit('stage:presence', { conversationId, occupants: await stageOccupants(conversationId) });
+    };
+    /** Leaves the room only if this socket is the one holding the user's spot (another device may have taken over). */
+    const leaveStage = async (conversationId: string) => {
+      if ((await redis.hget(viewingKey(conversationId), userId)) !== socket.id) return;
+      await redis.hdel(stageKey(conversationId), userId);
+      await emitStage(conversationId);
+    };
+
     socket.on('stage:action', (p: unknown) => wrap(async () => {
       const { conversationId, action, targetX, targetY, isPlus, avatarEffect, avatarAnimation } = StageAction.parse(p);
-      await requireMember(userId, conversationId);
+      // Only people who have the chat open are in its room (conv:join already checked membership).
+      if (!socket.data.convs.has(conversationId)) return;
+      const key = stageKey(conversationId);
+      const prevRaw = await redis.hget(key, userId);
+      const prev: StageOccupant = prevRaw ? JSON.parse(prevRaw) as StageOccupant : { userId };
+      if (SEATS.has(action)) {
+        const taken = (await stageOccupants(conversationId)).some((o) => o.userId !== userId && o.action === action);
+        // Someone got there first: resync this client so its companion stays put.
+        if (taken) { socket.emit('stage:presence', { conversationId, occupants: await stageOccupants(conversationId) }); return; }
+      }
+      // cheer / wave are gestures, not moves: the companion stays where (and how) it was.
+      if (action !== 'cheer' && action !== 'wave') {
+        const next: StageOccupant = { userId, action, targetX, targetY, isPlus, avatarEffect, avatarAnimation };
+        await redis.hset(key, userId, JSON.stringify(next));
+        await redis.expire(key, 24 * 60 * 60);
+        if (SEATS.has(action) || SEATS.has(prev.action)) await emitStage(conversationId);
+      }
       io.to(rooms.conv(conversationId)).emit('stage:action', {
         conversationId,
         userId,
@@ -217,6 +269,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
       clearInterval(beat);
       await dropPresence(userId, socket.id);
       for (const c of socket.data.convs) {
+        await leaveStage(c).catch(() => {});
         if ((await redis.hget(viewingKey(c), userId)) === socket.id) await redis.hdel(viewingKey(c), userId);
         await setTyping(userId, c, false).catch(() => {});
       }

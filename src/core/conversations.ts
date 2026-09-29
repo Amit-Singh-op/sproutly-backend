@@ -88,8 +88,8 @@ export async function conversationDetail(userId: string, id: string): Promise<Co
     'SELECT id, kind, title, avatar_color, member_count, plus_only FROM conversations WHERE id = $1', [id],
   );
   if (!c) throw E.notFound('Conversation not found');
-  const members = await q<{ user_id: string; display_name: string; avatar_color: string; last_seen_at: Date | null }>(
-    `SELECT m.user_id, u.display_name, u.avatar_color, u.last_seen_at FROM conversation_members m JOIN users u ON u.id = m.user_id
+  const members = await q<{ user_id: string; display_name: string; avatar_color: string; avatar_url: string | null; last_seen_at: Date | null }>(
+    `SELECT m.user_id, u.display_name, u.avatar_color, u.avatar_url, u.last_seen_at FROM conversation_members m JOIN users u ON u.id = m.user_id
       WHERE m.conversation_id = $1 LIMIT ${LIMITS.plusGroupMax}`, [id],
   );
   const other = c.kind === 'dm' ? members.find((x) => x.user_id !== userId) : undefined;
@@ -102,6 +102,7 @@ export async function conversationDetail(userId: string, id: string): Promise<Co
     title,
     initials: initialsOf(title),
     avatarColor: c.kind === 'dm' ? other?.avatar_color ?? c.avatar_color : c.avatar_color,
+    avatarUrl: c.kind === 'dm' && !blocked ? other?.avatar_url ?? null : null,
     memberCount: c.member_count,
     onlineCount: Object.values(online).filter(Boolean).length,
     otherUserId: other?.user_id ?? null,
@@ -110,6 +111,14 @@ export async function conversationDetail(userId: string, id: string): Promise<Co
     plusOnly: c.plus_only,
     readOnly: m.read_only,
     myReadSeq: m.read_seq,
+    members: members.map((x) => ({
+      userId: x.user_id,
+      displayName: x.display_name,
+      avatarColor: x.avatar_color,
+      avatarUrl: x.avatar_url,
+      online: online[x.user_id] ?? false,
+      lastSeenAt: x.last_seen_at?.toISOString() ?? null,
+    })),
   };
 }
 

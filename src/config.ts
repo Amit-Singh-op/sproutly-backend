@@ -38,6 +38,11 @@ const Env = z.object({
   API_PORT: z.coerce.number().default(4000),
   RT_PORT: z.coerce.number().default(4001),
   CORS_ORIGINS: z.string().default('*'),
+  // Cloudinary (profile photos). Either CLOUDINARY_URL=cloudinary://<key>:<secret>@<cloud> or the three parts.
+  CLOUDINARY_URL: z.string().optional(),
+  CLOUDINARY_CLOUD_NAME: z.string().optional(),
+  CLOUDINARY_API_KEY: z.string().optional(),
+  CLOUDINARY_API_SECRET: z.string().optional(),
 });
 
 // Blank values (e.g. "GMAIL_USER=") mean unset, not an invalid email/url.

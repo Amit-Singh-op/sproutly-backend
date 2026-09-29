@@ -102,10 +102,16 @@ export async function getCompanion(userId: string, db?: Db): Promise<Companion> 
   return companionFromRow(r);
 }
 
-interface StyleRow { bubble: string; text_color: string; border: string; design: ChatStyle['design']; avatar_color: string; animation: ChatStyle['animation']; wallpaper?: string | null; version: number }
+interface StyleRow {
+  bubble: string; text_color: string; border: string; design: ChatStyle['design']; avatar_color: string; animation: ChatStyle['animation']; wallpaper?: string | null; version: number;
+  avatar_animation?: ChatStyle['avatarAnimation'] | null; avatar_effect?: ChatStyle['avatarEffect'] | null; avatar_charm?: ChatStyle['avatarCharm'] | null;
+}
 const styleFromRow = (r: StyleRow): ChatStyle => ({
   bubble: r.bubble, text: r.text_color, border: r.border, design: r.design, avatar: r.avatar_color, animation: r.animation,
   wallpaper: (WALLPAPERS as readonly string[]).includes(r.wallpaper ?? '') ? (r.wallpaper as ChatStyle['wallpaper']) : 'lavender',
+  ...(r.avatar_animation ? { avatarAnimation: r.avatar_animation } : {}),
+  ...(r.avatar_effect ? { avatarEffect: r.avatar_effect } : {}),
+  ...(r.avatar_charm ? { avatarCharm: r.avatar_charm } : {}),
 });
 
 export async function getChatStyle(userId: string): Promise<{ style: ChatStyle; version: number }> {
@@ -114,15 +120,15 @@ export async function getChatStyle(userId: string): Promise<{ style: ChatStyle; 
 }
 
 export async function getMe(userId: string): Promise<Me> {
-  const u = await one<{ id: string; handle: string; display_name: string; avatar_color: string; timezone: string; read_receipts: boolean }>(
-    'SELECT id, handle, display_name, avatar_color, timezone, read_receipts FROM users WHERE id = $1', [userId],
+  const u = await one<{ id: string; handle: string; display_name: string; avatar_color: string; avatar_url: string | null; timezone: string; read_receipts: boolean }>(
+    'SELECT id, handle, display_name, avatar_color, avatar_url, timezone, read_receipts FROM users WHERE id = $1', [userId],
   );
   if (!u) throw E.unauthorized();
   const [companion, entitlements, style, quests, approved] = await Promise.all([
     getCompanion(userId), getEntitlements(userId), getChatStyle(userId), ensureQuests(userId), isApproved(userId),
   ]);
   return {
-    id: u.id, handle: u.handle, displayName: u.display_name, initials: initialsOf(u.display_name), avatarColor: u.avatar_color,
+    id: u.id, handle: u.handle, displayName: u.display_name, initials: initialsOf(u.display_name), avatarColor: u.avatar_color, avatarUrl: u.avatar_url,
     timezone: u.timezone, readReceipts: u.read_receipts, approved, companion, entitlements, chatStyle: style.style, quests,
   };
 }
@@ -131,11 +137,13 @@ export async function getMe(userId: string): Promise<Me> {
 export async function userStyles(ids: string[]): Promise<UserStyle[]> {
   if (ids.length === 0) return [];
   const rows = await q<{
-    id: string; display_name: string; avatar_color: string; plus_active: boolean | null; palette: PaletteId; equipped_outfit: Outfit; signature_move: Mood;
+    id: string; display_name: string; handle: string; avatar_color: string; avatar_url: string | null; plus_active: boolean | null; palette: PaletteId; equipped_outfit: Outfit; level: number; signature_move: Mood;
     bubble: string | null; text_color: string; border: string; design: ChatStyle['design']; s_avatar: string; animation: ChatStyle['animation']; wallpaper: string | null; version: number | null;
+    avatar_animation: ChatStyle['avatarAnimation'] | null; avatar_effect: ChatStyle['avatarEffect'] | null; avatar_charm: ChatStyle['avatarCharm'] | null;
   }>(
-    `SELECT u.id, u.display_name, u.avatar_color, e.plus_active, c.palette, c.equipped_outfit, c.signature_move,
-            s.bubble, s.text_color, s.border, s.design, s.avatar_color AS s_avatar, s.animation, s.wallpaper, s.version
+    `SELECT u.id, u.display_name, u.handle, u.avatar_color, u.avatar_url, e.plus_active, c.palette, c.equipped_outfit, c.level, c.signature_move,
+            s.bubble, s.text_color, s.border, s.design, s.avatar_color AS s_avatar, s.animation, s.wallpaper, s.version,
+            s.avatar_animation, s.avatar_effect, s.avatar_charm
        FROM users u
        LEFT JOIN entitlements e ON e.user_id = u.id
        LEFT JOIN companions c ON c.user_id = u.id
@@ -145,11 +153,12 @@ export async function userStyles(ids: string[]): Promise<UserStyle[]> {
   );
   return rows.map((r) => {
     const plus = !!r.plus_active;
-    const style = plus ? (r.bubble ? styleFromRow({ bubble: r.bubble, text_color: r.text_color, border: r.border, design: r.design, avatar_color: r.s_avatar, animation: r.animation, wallpaper: r.wallpaper, version: r.version ?? 1 }) : DEFAULT_CHAT_STYLE) : null;
+    const style = plus ? (r.bubble ? styleFromRow({ bubble: r.bubble, text_color: r.text_color, border: r.border, design: r.design, avatar_color: r.s_avatar, animation: r.animation, wallpaper: r.wallpaper, version: r.version ?? 1, avatar_animation: r.avatar_animation, avatar_effect: r.avatar_effect, avatar_charm: r.avatar_charm }) : DEFAULT_CHAT_STYLE) : null;
     return {
       userId: r.id, displayName: r.display_name, initials: initialsOf(r.display_name),
+      handle: r.handle, avatarUrl: r.avatar_url,
       avatarColor: plus && style ? style.avatar : r.avatar_color, isPlus: plus, style,
-      companion: { palette: r.palette ?? 'mo', outfit: r.equipped_outfit ?? 'none', signatureMove: r.signature_move ?? 'wave' },
+      companion: { palette: r.palette ?? 'mo', outfit: r.equipped_outfit ?? 'none', level: r.level ?? 1, signatureMove: r.signature_move ?? 'wave' },
       // Version changes whenever anything visible changes (style saved, plan changed) so client caches refresh.
       version: (r.version ?? 0) * 2 + (plus ? 1 : 0),
     };
