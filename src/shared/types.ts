@@ -169,6 +169,7 @@ export interface ConversationSummary {
   kind: 'dm' | 'group';
   title: string;
   avatarColor: string;
+  avatarUrl?: string | null;
   initials: string;
   lastSeq: number;
   lastMessageAt: string | null;
@@ -257,6 +258,7 @@ export interface ShowcasePost {
   authorName: string;
   authorInitials: string;
   authorColor: string;
+  authorUrl?: string | null;
   authorIsPlus: boolean;
   caption: string;
   createdAt: string;
@@ -331,7 +333,7 @@ export interface ConversationDetail {
   members?: ConversationMemberInfo[];
 }
 
-export interface Person { id: UUID; displayName: string; handle: string; avatarColor: string; initials: string; online?: boolean }
+export interface Person { id: UUID; displayName: string; handle: string; avatarColor: string; avatarUrl?: string | null; initials: string; online?: boolean }
 
 export type SendInput =
   | { clientId: UUID; conversationId: UUID; type: 'text'; body: string }

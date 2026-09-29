@@ -8,17 +8,17 @@ import { isPlus } from './entitlements.js';
 
 interface PostRow {
   id: string; user_id: string; caption: string; snapshot: ShowcasePost['snapshot']; cheer_count: number; created_at: Date;
-  display_name: string; avatar_color: string; plus_active: boolean | null; cheered: boolean; top: boolean;
+  display_name: string; avatar_color: string; avatar_url: string | null; plus_active: boolean | null; cheered: boolean; top: boolean;
 }
 
 const POST_SELECT = `
-  SELECT p.id, p.user_id, p.caption, p.snapshot, p.cheer_count, p.created_at, u.display_name, u.avatar_color, e.plus_active,
+  SELECT p.id, p.user_id, p.caption, p.snapshot, p.cheer_count, p.created_at, u.display_name, u.avatar_color, u.avatar_url, e.plus_active,
          EXISTS (SELECT 1 FROM showcase_cheers sc WHERE sc.post_id = p.id AND sc.user_id = $1) AS cheered,
          EXISTS (SELECT 1 FROM weekly_top w WHERE w.post_id = p.id AND w.week_start = date_trunc('week', now())::date) AS top
     FROM showcase_posts p JOIN users u ON u.id = p.user_id LEFT JOIN entitlements e ON e.user_id = p.user_id`;
 
 const toPost = (r: PostRow): ShowcasePost => ({
-  id: r.id, userId: r.user_id, authorName: r.display_name, authorInitials: initialsOf(r.display_name), authorColor: r.avatar_color,
+  id: r.id, userId: r.user_id, authorName: r.display_name, authorInitials: initialsOf(r.display_name), authorColor: r.avatar_color, authorUrl: r.avatar_url,
   // Gold card + badge only; no ranking boost for Plus (doc section 11).
   authorIsPlus: !!r.plus_active, caption: r.caption, createdAt: r.created_at.toISOString(), snapshot: r.snapshot,
   cheerCount: r.cheer_count, cheeredByMe: r.cheered, topOfWeek: r.top,

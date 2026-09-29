@@ -26,7 +26,7 @@ export async function memberIds(conversationId: string, db?: Db): Promise<string
 interface SummaryRow {
   id: string; kind: 'dm' | 'group'; title: string | null; avatar_color: string; last_seq: number; last_message_at: Date | null;
   member_count: number; plus_only: boolean; muted_until: Date | null; pinned: boolean; unread: number;
-  other_id: string | null; other_name: string | null; other_color: string | null;
+  other_id: string | null; other_name: string | null; other_color: string | null; other_avatar_url: string | null;
   lm_type: Message['type'] | null; lm_body: string | null; lm_payload: Message['payload']; lm_deleted_at: Date | null; lm_sender: string | null; lm_sender_name: string | null;
 }
 
@@ -35,13 +35,13 @@ const SUMMARY_SQL = `
          m.muted_until, m.pinned,
          (SELECT count(*)::int FROM messages x WHERE x.conversation_id = c.id AND x.seq > m.read_seq
              AND x.sender_id IS DISTINCT FROM m.user_id AND x.deleted_at IS NULL AND x.type <> 'system') AS unread,
-         o.id AS other_id, o.display_name AS other_name, o.avatar_color AS other_color,
+         o.id AS other_id, o.display_name AS other_name, o.avatar_color AS other_color, o.avatar_url AS other_avatar_url,
          lm.type AS lm_type, lm.body AS lm_body, lm.payload AS lm_payload, lm.deleted_at AS lm_deleted_at, lm.sender_id AS lm_sender,
          su.display_name AS lm_sender_name
     FROM conversation_members m
     JOIN conversations c ON c.id = m.conversation_id
     LEFT JOIN LATERAL (
-      SELECT u.id, u.display_name, u.avatar_color FROM conversation_members m2 JOIN users u ON u.id = m2.user_id
+      SELECT u.id, u.display_name, u.avatar_color, u.avatar_url FROM conversation_members m2 JOIN users u ON u.id = m2.user_id
        WHERE c.kind = 'dm' AND m2.conversation_id = c.id AND m2.user_id <> m.user_id LIMIT 1
     ) o ON TRUE
     LEFT JOIN messages lm ON lm.id = c.last_message_id
@@ -55,6 +55,7 @@ function toSummary(r: SummaryRow, viewerId: string): ConversationSummary {
     kind: r.kind,
     title,
     avatarColor: r.kind === 'dm' ? r.other_color ?? r.avatar_color : r.avatar_color,
+    avatarUrl: r.kind === 'dm' ? r.other_avatar_url : null,
     initials: initialsOf(title),
     lastSeq: r.last_seq,
     lastMessageAt: r.last_message_at?.toISOString() ?? null,

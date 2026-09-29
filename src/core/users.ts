@@ -194,14 +194,14 @@ export async function isBlocked(a: string, b: string): Promise<boolean> {
   return !!(await one(`SELECT 1 FROM friendships WHERE ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1)) AND status = 'blocked'`, [a, b]));
 }
 
-async function toPeople(rows: { id: string; display_name: string; handle: string; avatar_color: string }[]): Promise<Person[]> {
+async function toPeople(rows: { id: string; display_name: string; handle: string; avatar_color: string; avatar_url: string | null }[]): Promise<Person[]> {
   const online = await onlineMap(rows.map((r) => r.id));
-  return rows.map((r) => ({ id: r.id, displayName: r.display_name, handle: r.handle, avatarColor: r.avatar_color, initials: initialsOf(r.display_name), online: online[r.id] ?? false }));
+  return rows.map((r) => ({ id: r.id, displayName: r.display_name, handle: r.handle, avatarColor: r.avatar_color, avatarUrl: r.avatar_url, initials: initialsOf(r.display_name), online: online[r.id] ?? false }));
 }
 
 export async function friends(userId: string): Promise<Person[]> {
-  const rows = await q<{ id: string; display_name: string; handle: string; avatar_color: string }>(
-    `SELECT u.id, u.display_name, u.handle, u.avatar_color FROM friendships f JOIN users u ON u.id = f.friend_id
+  const rows = await q<{ id: string; display_name: string; handle: string; avatar_color: string; avatar_url: string | null }>(
+    `SELECT u.id, u.display_name, u.handle, u.avatar_color, u.avatar_url FROM friendships f JOIN users u ON u.id = f.friend_id
       WHERE f.user_id = $1 AND f.status = 'accepted' ORDER BY u.display_name`, [userId],
   );
   return toPeople(rows);
@@ -232,8 +232,8 @@ export async function blockUser(userId: string, targetId: string) {
 
 export async function search(userId: string, term: string) {
   const like = `%${term.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
-  const people = await q<{ id: string; display_name: string; handle: string; avatar_color: string }>(
-    `SELECT u.id, u.display_name, u.handle, u.avatar_color FROM users u
+  const people = await q<{ id: string; display_name: string; handle: string; avatar_color: string; avatar_url: string | null }>(
+    `SELECT u.id, u.display_name, u.handle, u.avatar_color, u.avatar_url FROM users u
       WHERE u.id <> $1 AND (u.display_name ILIKE $2 OR u.handle ILIKE $2)
         AND NOT EXISTS (SELECT 1 FROM friendships f WHERE f.status = 'blocked' AND ((f.user_id = u.id AND f.friend_id = $1) OR (f.user_id = $1 AND f.friend_id = u.id)))
       ORDER BY (u.handle ILIKE $3) DESC, u.display_name LIMIT 20`, [userId, like, `${term}%`],
