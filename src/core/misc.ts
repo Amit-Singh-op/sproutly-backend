@@ -14,7 +14,7 @@ export async function registerDevice(userId: string, platform: 'ios' | 'android'
 }
 
 /** Reports queue; a showcase post is auto-hidden after 5 distinct reports. */
-export async function report(userId: string, targetType: 'user' | 'message' | 'post', targetId: string, reason: string) {
+export async function report(userId: string, targetType: 'user' | 'message' | 'post' | 'story', targetId: string, reason: string) {
   await q(
     `INSERT INTO reports (reporter_id, target_type, target_id, reason) VALUES ($1,$2,$3,$4)
      ON CONFLICT (reporter_id, target_type, target_id) DO NOTHING`, [userId, targetType, targetId, reason.slice(0, 500)],
@@ -22,6 +22,10 @@ export async function report(userId: string, targetType: 'user' | 'message' | 'p
   if (targetType === 'post') {
     const n = await one<{ n: number }>(`SELECT count(*)::int AS n FROM reports WHERE target_type = 'post' AND target_id = $1`, [targetId]);
     if ((n?.n ?? 0) >= LIMITS.reportsToHide) await q('UPDATE showcase_posts SET hidden = TRUE WHERE id = $1', [targetId]);
+  }
+  if (targetType === 'story') {
+    const n = await one<{ n: number }>(`SELECT count(*)::int AS n FROM reports WHERE target_type = 'story' AND target_id = $1`, [targetId]);
+    if ((n?.n ?? 0) >= LIMITS.reportsToHide) await q('DELETE FROM stories WHERE id = $1', [targetId]);
   }
 }
 
