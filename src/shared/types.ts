@@ -398,7 +398,7 @@ export interface DropClaim { drop: DailyDrop; reward: DropReward; energy: number
 export interface AvatarStageAction {
   conversationId: UUID;
   userId: UUID;
-  action: 'walk' | 'chair' | 'jukebox' | 'plant' | 'coffee' | 'nap' | 'cheer' | 'wave';
+  action: 'walk' | 'chair' | 'jukebox' | 'plant' | 'coffee' | 'nap' | 'cheer' | 'wave' | 'dance' | 'jump' | 'love';
   targetX?: number;
   targetY?: number;
   isPlus?: boolean;
@@ -418,6 +418,10 @@ export interface StageOccupant {
 }
 /** Everyone in the room; sent whenever someone enters, leaves, or takes/leaves a seat. */
 export interface StagePresence { conversationId: UUID; occupants: StageOccupant[] }
+/** Most companions one chat's room holds at once. */
+export const STAGE_CAPACITY = 25;
+/** Sent to you when the room is full: you can still chat, your companion waits outside until a spot opens. */
+export interface StageFull { conversationId: UUID; capacity: number; count: number }
 
 
 // ---------- show off: daily activity ----------
@@ -473,6 +477,7 @@ export interface ServiceEvents {
   'room:state': RoomState;
   'stage:action': AvatarStageAction;
   'stage:presence': StagePresence;
+  'stage:full': StageFull;
   connection: { connected: boolean };
 }
 export type EventName = keyof ServiceEvents;

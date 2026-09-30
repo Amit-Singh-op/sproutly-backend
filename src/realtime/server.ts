@@ -16,7 +16,7 @@ import { log } from '../lib/log.js';
 import { ONLINE_SET, dropPresence, isOnline, touchPresence, viewingKey } from '../lib/presence.js';
 import { redis } from '../lib/redis.js';
 import { LIMITS } from '../shared/rules.js';
-import type { RoomState, SendAck, StageOccupant } from '../shared/types.js';
+import { STAGE_CAPACITY, type RoomState, type SendAck, type StageOccupant } from '../shared/types.js';
 
 const HEARTBEAT_MS = 25_000;
 const ConvRef = z.object({ conversationId: z.string().uuid() });
@@ -25,7 +25,7 @@ const Hello = z.object({ conversations: z.array(z.object({ id: z.string().uuid()
 const OwnerRef = z.object({ ownerId: z.string().uuid() });
 const StageAction = z.object({
   conversationId: z.string().uuid(),
-  action: z.enum(['walk', 'chair', 'jukebox', 'plant', 'coffee', 'nap', 'cheer', 'wave']),
+  action: z.enum(['walk', 'chair', 'jukebox', 'plant', 'coffee', 'nap', 'cheer', 'wave', 'dance', 'jump', 'love']),
   // Fractions of the floor (0..1) so positions line up on every screen width.
   targetX: z.number().min(0).max(1).optional(),
   targetY: z.number().min(0).max(1).optional(),
@@ -68,6 +68,8 @@ async function roomState(ownerId: string): Promise<RoomState> {
 // ---------------- chat avatar rooms ----------------
 // stage:{conversationId} -> userId -> StageOccupant. Only people with the chat open are in it.
 const stageKey = (c: string) => `stage:${c}`;
+/** Gestures play where you stand; they don't move you or change your spot. */
+const GESTURES = new Set<StageOccupant['action']>(['cheer', 'wave', 'dance', 'jump', 'love']);
 /** Seats one companion at a time; the rest (jukebox, plant, coffee) are shared spots. */
 const SEATS = new Set<StageOccupant['action']>(['chair', 'nap']);
 
@@ -177,11 +179,13 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
       await socket.join(rooms.conv(conversationId));
       socket.data.convs.add(conversationId);
       await redis.hset(viewingKey(conversationId), userId, socket.id);
-      // Enter the chat's avatar room (keeping a spot held from another device) and tell everyone who's here.
-      const key = stageKey(conversationId);
-      if (!(await redis.hexists(key, userId))) await redis.hset(key, userId, JSON.stringify({ userId } satisfies StageOccupant));
-      await redis.expire(key, 24 * 60 * 60);
-      await emitStage(conversationId);
+      await enterStage(conversationId);
+    }));
+    // Waiting outside a full room: the app asks again when it sees a spot open.
+    socket.on('stage:enter', (p: unknown) => wrap(async () => {
+      const { conversationId } = ConvRef.parse(p);
+      if (!socket.data.convs.has(conversationId)) return;
+      await enterStage(conversationId);
     }));
     socket.on('conv:leave', (p: unknown) => wrap(async () => {
       const { conversationId } = ConvRef.parse(p);
@@ -228,12 +232,33 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
       await emitStage(conversationId);
     };
 
+    /**
+     * Enter the chat's avatar room (keeping a spot held from another device) and tell everyone who's here.
+     * Rooms hold STAGE_CAPACITY companions: past that you still chat, but you get 'stage:full' and wait outside.
+     */
+    const enterStage = async (conversationId: string) => {
+      const key = stageKey(conversationId);
+      if (!(await redis.hexists(key, userId))) {
+        const inside = await stageOccupants(conversationId);
+        if (inside.length >= STAGE_CAPACITY) {
+          socket.emit('stage:full', { conversationId, capacity: STAGE_CAPACITY, count: inside.length });
+          socket.emit('stage:presence', { conversationId, occupants: inside });
+          return;
+        }
+        await redis.hset(key, userId, JSON.stringify({ userId } satisfies StageOccupant));
+      }
+      await redis.expire(key, 24 * 60 * 60);
+      await emitStage(conversationId);
+    };
+
     socket.on('stage:action', (p: unknown) => wrap(async () => {
       const { conversationId, action, targetX, targetY, isPlus, avatarEffect, avatarAnimation } = StageAction.parse(p);
       // Only people who have the chat open are in its room (conv:join already checked membership).
       if (!socket.data.convs.has(conversationId)) return;
       const key = stageKey(conversationId);
       const prevRaw = await redis.hget(key, userId);
+      // Waiting outside a full room: nothing you do shows inside it.
+      if (!prevRaw) return;
       const prev: StageOccupant = prevRaw ? JSON.parse(prevRaw) as StageOccupant : { userId };
       if (SEATS.has(action)) {
         const taken = (await stageOccupants(conversationId)).some((o) => o.userId !== userId && o.action === action);
@@ -241,7 +266,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
         if (taken) { socket.emit('stage:presence', { conversationId, occupants: await stageOccupants(conversationId) }); return; }
       }
       // cheer / wave are gestures, not moves: the companion stays where (and how) it was.
-      if (action !== 'cheer' && action !== 'wave') {
+      if (!GESTURES.has(action)) {
         const next: StageOccupant = { userId, action, targetX, targetY, isPlus, avatarEffect, avatarAnimation };
         await redis.hset(key, userId, JSON.stringify(next));
         await redis.expire(key, 24 * 60 * 60);
