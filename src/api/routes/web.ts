@@ -74,6 +74,35 @@ const DELETE_DATA_PAGE = page('Delete your data', `
 <p>To ask us to delete any other data about you, email <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> from your account email and say what you'd like removed. We'll reply within 30 days.</p>
 <p class="muted" style="margin-top:20px">Want to delete everything? <a href="/delete-account">Delete your whole account</a>.</p>`);
 
+/** Published child-safety (CSAE) standards, required by Google Play for social apps. */
+const CHILD_SAFETY_PAGE = page('Child safety standards', `
+<h1>Child Safety Standards</h1>
+<p class="muted">Sproutly · Last updated ${esc(LEGAL_UPDATED)}</p>
+<p style="margin-top:16px">Sproutly has zero tolerance for child sexual abuse and exploitation (CSAE), including child sexual abuse material (CSAM). These standards apply to everything on Sproutly: profiles, chats, groups, stories, Show off posts, comments and photos.</p>
+<h2>Who can use Sproutly</h2>
+<p>You must be at least 13 years old to use Sproutly. Accounts we believe belong to someone under 13 are removed.</p>
+<h2>What is not allowed</h2>
+<p>• Any sexual content involving minors, real or fictional, including images, videos, drawings, text and links.
+• Grooming: befriending or messaging a minor with the intent of sexual contact or exploitation.
+• Sextortion, or asking a minor for sexual images or personal information.
+• Sexualising minors in any way, or sharing, requesting or trading CSAM.
+• Using Sproutly to arrange meeting a minor for sexual purposes, or trafficking.</p>
+<h2>How we prevent it</h2>
+<p>• Anyone can report a user, message, story, post or comment from inside the app. Content reported by several people is hidden automatically while we review it.
+• Anyone can block another user, which stops all contact and hides their content.
+• Messages are limited in rate to prevent spam, and chat messages are deleted from our servers after 3 days.
+• We review reports and act on them promptly.</p>
+<h2>What we do when we find it</h2>
+<p>• We remove the content and permanently ban the accounts involved.
+• We preserve the relevant information as required by law.
+• We report apparent CSAM to the National Center for Missing &amp; Exploited Children (NCMEC) and to the relevant regional and national authorities, and we cooperate with law enforcement.</p>
+<h2>How to report</h2>
+<p>• In the app: tap the report (shield) button on a post or story, or long-press a message or comment and choose Report. You can also report a user from their profile.
+• By email: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>. Please include the username and what happened. Do not attach or forward abusive images.
+• If a child is in immediate danger, contact your local police or emergency services first.</p>
+<h2>Contact</h2>
+<p>Our child safety point of contact can be reached at <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.</p>`);
+
 export async function webRoutes(app: FastifyInstance) {
   const html = (body: string) => (_req: unknown, reply: { type: (t: string) => { send: (b: string) => unknown } }) => reply.type('text/html; charset=utf-8').send(body);
   const privacy = legal(PRIVACY);
@@ -82,6 +111,7 @@ export async function webRoutes(app: FastifyInstance) {
   app.get('/terms', html(terms));
   app.get('/delete-account', html(DELETE_PAGE));
   app.get('/delete-data', html(DELETE_DATA_PAGE));
+  app.get('/child-safety', html(CHILD_SAFETY_PAGE));
 
   app.post('/v1/account/delete-by-code', async (req) => {
     const b = z.object({ phoneOrEmail: z.string().min(3).max(200), code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') }).parse(req.body);
