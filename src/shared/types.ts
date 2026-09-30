@@ -398,7 +398,7 @@ export interface DropClaim { drop: DailyDrop; reward: DropReward; energy: number
 export interface AvatarStageAction {
   conversationId: UUID;
   userId: UUID;
-  action: 'walk' | 'chair' | 'jukebox' | 'plant' | 'coffee' | 'nap' | 'cheer' | 'wave' | 'dance' | 'jump' | 'love';
+  action: 'walk' | 'chair' | 'jukebox' | 'plant' | 'coffee' | 'nap' | 'cheer' | 'wave' | 'dance' | 'jump' | 'love' | 'portal';
   targetX?: number;
   targetY?: number;
   isPlus?: boolean;

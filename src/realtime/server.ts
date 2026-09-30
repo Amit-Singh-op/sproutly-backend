@@ -25,7 +25,8 @@ const Hello = z.object({ conversations: z.array(z.object({ id: z.string().uuid()
 const OwnerRef = z.object({ ownerId: z.string().uuid() });
 const StageAction = z.object({
   conversationId: z.string().uuid(),
-  action: z.enum(['walk', 'chair', 'jukebox', 'plant', 'coffee', 'nap', 'cheer', 'wave', 'dance', 'jump', 'love']),
+  // portal = walk out one door and back in through the other; targetX/Y is where you end up.
+  action: z.enum(['walk', 'chair', 'jukebox', 'plant', 'coffee', 'nap', 'cheer', 'wave', 'dance', 'jump', 'love', 'portal']),
   // Fractions of the floor (0..1) so positions line up on every screen width.
   targetX: z.number().min(0).max(1).optional(),
   targetY: z.number().min(0).max(1).optional(),
