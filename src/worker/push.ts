@@ -103,8 +103,9 @@ export async function handlePush(job: PushJob) {
 
 const EMOJI_FALLBACK: Record<string, string> = {
   smile: '🙂', laugh: '😂', love: '😍', wink: '😉', cool: '😎', wow: '😮', blush: '😊', sad: '😢', cry: '😭', angry: '😠', sleepy: '😴', party: '🥳',
+  kiss: '😘', yum: '😋', think: '🤔', star: '🤩', smug: '😏', dizzy: '😵‍💫', bloom: '🌸', fire: '🔥', glitch: '⚡',
 };
-const emojiFallback = (s: string) => s.replace(/:(?:mo|pip|blu|drake|bolt)-(smile|laugh|love|wink|cool|wow|blush|sad|cry|angry|sleepy|party):/g, (_, f: string) => EMOJI_FALLBACK[f] ?? '');
+const emojiFallback = (s: string) => s.replace(/:(?:mo|pip|blu|drake|bolt)-(smile|laugh|love|wink|cool|wow|blush|sad|cry|angry|sleepy|party|kiss|yum|think|star|smug|dizzy|bloom|fire|glitch):/g, (_, f: string) => EMOJI_FALLBACK[f] ?? '');
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /** "@handle" or "@FirstName" (case-insensitive, whole word) anywhere in the message. */
