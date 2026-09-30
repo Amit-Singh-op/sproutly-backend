@@ -6,7 +6,8 @@ import { registerDevice, report } from '../../core/misc.js';
 import { deleteAccount } from '../../core/account.js';
 import { toUsers } from '../../lib/emitter.js';
 import { isValidTimezone } from '../../lib/time.js';
-import { LIMITS } from '../../shared/rules.js';
+import { LIMITS, RATE_LIMITS } from '../../shared/rules.js';
+import { limit } from '../../lib/ratelimit.js';
 import { E } from '../../lib/errors.js';
 import { UPLOAD_FOLDERS, isOwnCloudinaryUrl, uploadSignature } from '../../lib/cloudinary.js';
 
@@ -46,6 +47,8 @@ export async function meRoutes(app: FastifyInstance) {
   /** Signed params for a direct Cloudinary upload (see lib/cloudinary.ts). */
   app.post('/uploads/signature', async (req) => {
     const { folder } = z.object({ folder: z.enum(UPLOAD_FOLDERS).default('avatars') }).parse(req.body ?? {});
+    // Uploads cost storage/bandwidth: cap how many a person can start.
+    await limit(`upload:${req.userId}`, RATE_LIMITS.uploadsPerUser, "You've uploaded a lot of photos recently. Please try again later.");
     return uploadSignature(req.userId, folder);
   });
 

@@ -21,13 +21,16 @@ export type UploadFolder = (typeof UPLOAD_FOLDERS)[number];
  * Signed direct upload: the app posts the file straight to Cloudinary with these params, so the API secret never
  * leaves the server and uploads can only land in the user's own folder.
  * Signature = sha1 of the alphabetically sorted params joined as k=v&k=v, followed by the secret.
+ * Signed (so the app can't change them): images only, and every photo is stored at most 2048px on its long side.
  */
 export function uploadSignature(userId: string, folder: UploadFolder) {
   const c = creds();
   if (!c) throw E.unavailable('UPLOADS_DISABLED', 'Photo uploads are not set up yet.');
   const params: Record<string, string> = {
+    allowed_formats: 'jpg,jpeg,png,webp,heic,heif,gif',
     folder: `sproutly/${folder}/${userId}`,
     timestamp: String(Math.floor(Date.now() / 1000)),
+    transformation: 'c_limit,w_2048,h_2048',
   };
   const toSign = Object.keys(params).sort().map((k) => `${k}=${params[k]}`).join('&');
   const signature = createHash('sha1').update(toSign + c.apiSecret).digest('hex');
@@ -36,6 +39,8 @@ export function uploadSignature(userId: string, folder: UploadFolder) {
     apiKey: c.apiKey,
     signature,
     ...params,
+    /** Every signed field, to send as-is with the file. */
+    params,
   };
 }
 
