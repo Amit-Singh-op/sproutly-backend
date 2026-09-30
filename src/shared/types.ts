@@ -272,7 +272,25 @@ export interface ShowcasePost {
   cheerCount: number;
   cheeredByMe: boolean;
   topOfWeek: boolean;
+  /** 'day' = a moment from your day (takes comments); 'mo' = a Mo update (no comments). */
+  kind: ShowcaseKind;
+  commentCount: number;
 }
+
+export type ShowcaseKind = 'day' | 'mo';
+export interface ShowcaseComment {
+  id: UUID;
+  postId: UUID;
+  userId: UUID;
+  authorName: string;
+  authorInitials: string;
+  authorColor: string;
+  authorUrl?: string | null;
+  authorIsPlus: boolean;
+  body: string;
+  createdAt: string;
+}
+export const COMMENT_MAX = 300;
 
 // ---------- groups ----------
 export interface GroupCard {

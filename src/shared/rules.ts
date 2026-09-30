@@ -27,6 +27,7 @@ export const RATE_LIMITS = {
   msgPerConversation: { points: 60, windowS: 60 },
   stickerPerUser: { points: 5, windowS: 10 },
   cheersPerUser: { points: 60, windowS: 60 },
+  commentsPerUser: { points: 20, windowS: 60 },
   otpPerHour: { points: 5, windowS: 3600 },
   uploadsPerUser: { points: 30, windowS: 3600 },
 } as const;

@@ -19,7 +19,7 @@ const PatchMe = z.object({
   avatarUrl: z.string().url().max(500).nullable().optional(),
 });
 const Device = z.object({ platform: z.enum(['ios', 'android']), pushToken: z.string().min(10).max(4096), appVersion: z.string().max(40).optional() });
-const Report = z.object({ targetType: z.enum(['user', 'message', 'post', 'story']), targetId: z.string().uuid(), reason: z.string().min(1).max(500) });
+const Report = z.object({ targetType: z.enum(['user', 'message', 'post', 'story', 'comment']), targetId: z.string().uuid(), reason: z.string().min(1).max(500) });
 
 export async function meRoutes(app: FastifyInstance) {
   app.get('/me', async (req) => getMe(req.userId));

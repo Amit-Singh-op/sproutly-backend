@@ -14,7 +14,7 @@ export async function registerDevice(userId: string, platform: 'ios' | 'android'
 }
 
 /** Reports queue; a showcase post is auto-hidden after 5 distinct reports. */
-export async function report(userId: string, targetType: 'user' | 'message' | 'post' | 'story', targetId: string, reason: string) {
+export async function report(userId: string, targetType: 'user' | 'message' | 'post' | 'story' | 'comment', targetId: string, reason: string) {
   await q(
     `INSERT INTO reports (reporter_id, target_type, target_id, reason) VALUES ($1,$2,$3,$4)
      ON CONFLICT (reporter_id, target_type, target_id) DO NOTHING`, [userId, targetType, targetId, reason.slice(0, 500)],
@@ -22,6 +22,13 @@ export async function report(userId: string, targetType: 'user' | 'message' | 'p
   if (targetType === 'post') {
     const n = await one<{ n: number }>(`SELECT count(*)::int AS n FROM reports WHERE target_type = 'post' AND target_id = $1`, [targetId]);
     if ((n?.n ?? 0) >= LIMITS.reportsToHide) await q('UPDATE showcase_posts SET hidden = TRUE WHERE id = $1', [targetId]);
+  }
+  if (targetType === 'comment') {
+    const n = await one<{ n: number }>(`SELECT count(*)::int AS n FROM reports WHERE target_type = 'comment' AND target_id = $1`, [targetId]);
+    if ((n?.n ?? 0) >= LIMITS.reportsToHide) {
+      const r = await one<{ post_id: string }>('DELETE FROM showcase_comments WHERE id = $1 RETURNING post_id', [targetId]);
+      if (r) await q('UPDATE showcase_posts SET comment_count = (SELECT count(*) FROM showcase_comments WHERE post_id = $1) WHERE id = $1', [r.post_id]);
+    }
   }
   if (targetType === 'story') {
     const n = await one<{ n: number }>(`SELECT count(*)::int AS n FROM reports WHERE target_type = 'story' AND target_id = $1`, [targetId]);
