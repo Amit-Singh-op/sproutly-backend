@@ -170,6 +170,9 @@ export function applyEnergy(level: number, energy: number, gain: number): { leve
 }
 
 /** Strip control characters (keep newline + tab) and trim. */
+/** Every message (DMs and groups) is kept for this long, then permanently deleted (hourly purge). */
+export const MESSAGE_RETENTION_DAYS = 3;
+
 export const cleanText = (s: string) => s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim();
 
 // ---------- XP ledger daily caps (Phase 0) ----------

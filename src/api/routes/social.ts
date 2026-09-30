@@ -4,9 +4,10 @@ import { currentEvent } from '../../core/conversations.js';
 import { getDrop, claimDrop } from '../../core/drops.js';
 import { listGuestbook, signGuestbook } from '../../core/guestbook.js';
 import { cheerRoom, getRoom, invite, respond } from '../../core/rooms.js';
-import { GUESTBOOK_STICKERS } from '../../shared/types.js';
+import { GUESTBOOK_STICKERS, SHOWCASE_ACTIVITIES } from '../../shared/types.js';
 import { LIMITS } from '../../shared/rules.js';
-import { cheer, createPost, feed, getPost } from '../../core/showcase.js';
+import { cheer, createPost, deletePost, feed, getPost } from '../../core/showcase.js';
+import { NewStoryBody, createStory, deleteStory, listStories, viewStory } from '../../core/stories.js';
 import { addFriend, blockUser, friends, removeFriend, search } from '../../core/users.js';
 
 const Id = z.object({ id: z.string().uuid() });
@@ -28,9 +29,23 @@ export async function socialRoutes(app: FastifyInstance) {
   // Showcase
   app.get('/showcase/feed', async (req) => feed(req.userId));
   app.get('/showcase/posts/:id', async (req) => getPost(req.userId, Id.parse(req.params).id));
-  app.post('/showcase/posts', async (req) => createPost(req.userId, z.object({ caption: z.string().max(200) }).parse(req.body).caption));
+  app.post('/showcase/posts', async (req) => {
+    const b = z.object({
+      caption: z.string().max(200).default(''),
+      imageUrl: z.string().url().max(500).nullable().optional(),
+      activity: z.enum(SHOWCASE_ACTIVITIES).nullable().optional(),
+    }).parse(req.body);
+    return createPost(req.userId, b.caption, b.imageUrl, b.activity);
+  });
+  app.delete('/showcase/posts/:id', async (req) => { await deletePost(req.userId, Id.parse(req.params).id); return { ok: true }; });
   app.post('/showcase/posts/:id/cheer', async (req) => cheer(req.userId, Id.parse(req.params).id, true));
   app.delete('/showcase/posts/:id/cheer', async (req) => cheer(req.userId, Id.parse(req.params).id, false));
+
+  // Stories (24 h)
+  app.get('/stories', async (req) => listStories(req.userId));
+  app.post('/stories', async (req) => createStory(req.userId, NewStoryBody.parse(req.body)));
+  app.delete('/stories/:id', async (req) => { await deleteStory(req.userId, Id.parse(req.params).id); return { ok: true }; });
+  app.post('/stories/:id/view', async (req) => { await viewStory(req.userId, Id.parse(req.params).id); return { ok: true }; });
 
   // Rooms. The app asks for "me" before it knows its id.
   app.get('/rooms/:userId', async (req) => {

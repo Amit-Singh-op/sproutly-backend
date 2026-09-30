@@ -2,8 +2,12 @@ import { LIMITS } from '../shared/rules.js';
 import { redis } from './redis.js';
 
 /** presence:{userId}:{socketId} with a 60 s TTL, refreshed by the socket heartbeat. Online = at least one key. */
+/** Everyone we've told the world is online; the sweeper checks them so nobody stays "online" after a hard exit. */
+export const ONLINE_SET = 'presence:online-users';
+
 export async function touchPresence(userId: string, socketId: string) {
   await redis.set(`presence:${userId}:${socketId}`, '1', 'EX', LIMITS.presenceTtlS);
+  await redis.sadd(ONLINE_SET, userId);
   await redis.sadd(`presence-sockets:${userId}`, socketId);
   await redis.expire(`presence-sockets:${userId}`, LIMITS.presenceTtlS * 2);
 }

@@ -14,7 +14,7 @@ function creds(): Creds | null {
   return cloudName && apiKey && apiSecret ? { cloudName: cloudName.trim(), apiKey: apiKey.trim(), apiSecret: apiSecret.trim() } : null;
 }
 
-export const UPLOAD_FOLDERS = ['avatars', 'chat'] as const;
+export const UPLOAD_FOLDERS = ['avatars', 'chat', 'stories', 'showcase'] as const;
 export type UploadFolder = (typeof UPLOAD_FOLDERS)[number];
 
 /**
@@ -39,9 +39,9 @@ export function uploadSignature(userId: string, folder: UploadFolder) {
   };
 }
 
-/** Only images we uploaded for this user may be saved as their profile photo. */
-export function isOwnCloudinaryUrl(url: string, userId: string): boolean {
+/** Only images this user uploaded (through a signature we issued, into that folder) may be saved against them. */
+export function isOwnCloudinaryUrl(url: string, userId: string, folder: UploadFolder = 'avatars'): boolean {
   const c = creds();
   if (!c) return false;
-  return url.startsWith(`https://res.cloudinary.com/${c.cloudName}/image/upload/`) && url.includes(`/sproutly/avatars/${userId}/`);
+  return url.startsWith(`https://res.cloudinary.com/${c.cloudName}/image/upload/`) && url.includes(`/sproutly/${folder}/${userId}/`);
 }

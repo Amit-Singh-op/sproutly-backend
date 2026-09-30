@@ -13,7 +13,7 @@ import { rooms, toUsers } from '../lib/emitter.js';
 import { AppError, publicValidationMessage } from '../lib/errors.js';
 import { verifyAccess } from '../lib/jwt.js';
 import { log } from '../lib/log.js';
-import { dropPresence, isOnline, touchPresence, viewingKey } from '../lib/presence.js';
+import { ONLINE_SET, dropPresence, isOnline, touchPresence, viewingKey } from '../lib/presence.js';
 import { redis } from '../lib/redis.js';
 import { LIMITS } from '../shared/rules.js';
 import type { RoomState, SendAck, StageOccupant } from '../shared/types.js';
@@ -101,6 +101,27 @@ const healthServer = () => createServer((req, res) => {
   if (!req.url?.startsWith('/socket.io')) { res.writeHead(404); res.end(); }
 });
 
+/**
+ * A clean disconnect announces "offline" right away. But when a phone dies, loses network without a close, or the
+ * server restarts, no disconnect handler runs: the presence keys just expire (60 s) and nobody is told, so friends
+ * kept seeing that person online. Every 20 s, anyone marked online whose keys have all expired is announced offline.
+ * Safe with several realtime instances: SREM decides which one announces.
+ */
+function startPresenceSweeper() {
+  const sweep = async () => {
+    const ids = await redis.smembers(ONLINE_SET);
+    for (const userId of ids) {
+      if (await isOnline(userId)) continue;
+      if ((await redis.srem(ONLINE_SET, userId)) === 0) continue;
+      await q('UPDATE users SET last_seen_at = now() WHERE id = $1', [userId]);
+      // Apps drop an offline user from every avatar room they show; the room lists also skip them on read.
+      await broadcastPresence(userId, false);
+    }
+  };
+  const timer = setInterval(() => { sweep().catch((err) => log.error({ err }, 'presence sweep failed')); }, 20_000);
+  timer.unref?.();
+}
+
 export function createRealtime(httpServer: HttpServer = healthServer()) {
   const io = new Server(httpServer, {
     cors: { origin: config.CORS_ORIGINS === '*' ? true : config.CORS_ORIGINS.split(',') },
@@ -108,6 +129,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
     pingTimeout: 20_000,
   });
   io.adapter(createAdapter(new Redis(config.REDIS_URL), new Redis(config.REDIS_URL)));
+  startPresenceSweeper();
 
   io.use(async (socket, next) => {
     try {
@@ -278,6 +300,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
         io.to(rooms.room(ownerId)).emit('room:state', await roomState(ownerId));
       }
       if (!(await isOnline(userId))) {
+        await redis.srem(ONLINE_SET, userId);
         await q('UPDATE users SET last_seen_at = now() WHERE id = $1', [userId]);
         await broadcastPresence(userId, false);
       }

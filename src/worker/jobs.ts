@@ -5,7 +5,7 @@ import { toUser } from '../lib/emitter.js';
 import { log } from '../lib/log.js';
 import type { EntitlementJob, FanoutJob, QuestJob } from '../lib/queues.js';
 import { dayDiff, localDay } from '../lib/time.js';
-import { LIMITS, applyEnergy } from '../shared/rules.js';
+import { LIMITS, MESSAGE_RETENTION_DAYS, applyEnergy } from '../shared/rules.js';
 
 export async function handleQuest(job: QuestJob) {
   if (job.kind === 'message.sent') {
@@ -102,6 +102,25 @@ export async function expireLapsedSubscriptions() {
 }
 
 /** Daily: drop webhook ids older than 30 days, expired OTPs, dead refresh tokens, old typing/viewing debris is TTL'd in Redis. */
+/**
+ * Hourly: permanently delete every message older than MESSAGE_RETENTION_DAYS (DMs and groups), in batches so the
+ * table is never locked for long; poll votes go with them (ON DELETE CASCADE). Also drops expired stories.
+ */
+export async function purgeOldMessages() {
+  let total = 0;
+  for (;;) {
+    const r = await q<{ id: string }>(
+      `DELETE FROM messages WHERE id IN (
+         SELECT id FROM messages WHERE created_at < now() - make_interval(days => $1) LIMIT 5000
+       ) RETURNING id`, [MESSAGE_RETENTION_DAYS],
+    );
+    total += r.length;
+    if (r.length < 5000) break;
+  }
+  const stories = await q<{ id: string }>(`DELETE FROM stories WHERE expires_at < now() RETURNING id`);
+  if (total || stories.length) log.info({ messages: total, stories: stories.length }, 'retention purge');
+}
+
 export async function cleanup() {
   await q(`DELETE FROM webhook_events WHERE received_at < now() - interval '30 days'`);
   await q(`DELETE FROM otp_codes WHERE expires_at < now()`);

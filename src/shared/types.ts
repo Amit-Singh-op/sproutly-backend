@@ -178,6 +178,8 @@ export interface ConversationSummary {
   memberCount: number;
   plusOnly: boolean;
   otherUserId: UUID | null; // for DMs (presence dot)
+  /** DM partner online when the list was fetched (live 'presence' events override it). */
+  otherOnline?: boolean;
   muted: boolean;
   pinned: boolean;
 }
@@ -261,6 +263,10 @@ export interface ShowcasePost {
   authorUrl?: string | null;
   authorIsPlus: boolean;
   caption: string;
+  /** Photo posted with it (Cloudinary). Without one, the card shows the companion snapshot. */
+  imageUrl?: string | null;
+  /** What they were doing ("daily activity"). */
+  activity?: ShowcaseActivity | null;
   createdAt: string;
   snapshot: { name: string; level: number; palette: PaletteId; outfit: Outfit; outfitLabel: string; signatureMove: Mood };
   cheerCount: number;
@@ -297,6 +303,8 @@ export interface Me {
   avatarUrl?: string | null;
   timezone: string;
   readReceipts: boolean;
+  /** Settings → Notifications (push). Only private chats and @mentions in groups ever notify. */
+  notificationsEnabled?: boolean;
   /** Invite-only: false until an admin approves the account (the app shows the waitlist screen). */
   approved: boolean;
   companion: Companion;
@@ -410,6 +418,44 @@ export interface StageOccupant {
 }
 /** Everyone in the room; sent whenever someone enters, leaves, or takes/leaves a seat. */
 export interface StagePresence { conversationId: UUID; occupants: StageOccupant[] }
+
+
+// ---------- show off: daily activity ----------
+export const SHOWCASE_ACTIVITIES = ['workout', 'study', 'food', 'outdoors', 'gaming', 'art', 'music', 'chill'] as const;
+export type ShowcaseActivity = (typeof SHOWCASE_ACTIVITIES)[number];
+/** Most Show off posts one person can share in any 24 hours. */
+export const SHOWCASE_DAILY_MAX = 5;
+
+// ---------- stories (24 h) ----------
+/** Backgrounds a text story can use (also the picker order). */
+export const STORY_BGS = ['#3B2A6B', '#2F8A6C', '#D9543A', '#3D6FD1', '#E7B94A', '#1C1B29', '#F6A5C0', '#7A5AF8'] as const;
+export type StoryBg = (typeof STORY_BGS)[number];
+export interface Story {
+  id: UUID;
+  kind: 'image' | 'text';
+  imageUrl: string | null;
+  /** Caption on a photo, or the whole text story. */
+  text: string | null;
+  bg: string | null;
+  createdAt: string;
+  expiresAt: string;
+  viewedByMe: boolean;
+  /** Only filled for your own stories. */
+  viewCount?: number;
+}
+/** One person's active stories, oldest first (the viewer plays them in order). */
+export interface StoryGroup {
+  userId: UUID;
+  displayName: string;
+  initials: string;
+  avatarColor: string;
+  avatarUrl: string | null;
+  isMe: boolean;
+  /** Any story in the group the viewer hasn't seen yet (coloured ring). */
+  hasUnseen: boolean;
+  stories: Story[];
+}
+export type NewStory = { kind: 'image'; imageUrl: string; text?: string } | { kind: 'text'; text: string; bg: StoryBg };
 
 export interface ServiceEvents {
   'guestbook:new': GuestbookEntry;

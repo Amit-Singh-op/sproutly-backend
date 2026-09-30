@@ -3,7 +3,7 @@ import { pool } from '../db/pool.js';
 import { log } from '../lib/log.js';
 import { bullConnection } from '../lib/redis.js';
 import { queue, type EntitlementJob, type FanoutJob, type PushJob, type QuestJob } from '../lib/queues.js';
-import { cleanup, expireLapsedSubscriptions, handleEntitlement, handleFanout, handleQuest, streakResets, weeklyTop } from './jobs.js';
+import { cleanup, purgeOldMessages, expireLapsedSubscriptions, handleEntitlement, handleFanout, handleQuest, streakResets, weeklyTop } from './jobs.js';
 import { handlePush } from './push.js';
 
 const workers = [
@@ -17,6 +17,7 @@ const workers = [
       case 'streaks': return streakResets();
       case 'expire-subscriptions': return expireLapsedSubscriptions();
       case 'cleanup': return cleanup();
+      case 'purge-messages': return purgeOldMessages();
     }
   }, { connection: bullConnection(), concurrency: 1 }),
 ];
@@ -35,6 +36,8 @@ await m.upsertJobScheduler('weekly-top', { pattern: '0 0 * * 1', tz: 'UTC' }, { 
 await m.upsertJobScheduler('streaks', { pattern: '5 * * * *' }, { name: 'streaks' });
 await m.upsertJobScheduler('expire-subscriptions', { pattern: '15 * * * *' }, { name: 'expire-subscriptions' });
 await m.upsertJobScheduler('cleanup', { pattern: '30 3 * * *', tz: 'UTC' }, { name: 'cleanup' });
+// Messages older than 3 days are deleted every hour (reads already hide them the moment they turn 3 days old).
+await m.upsertJobScheduler('purge-messages', { pattern: '20 * * * *' }, { name: 'purge-messages' });
 
 log.info('worker running: push, quests, showcase-fanout, entitlement-sync, maintenance');
 

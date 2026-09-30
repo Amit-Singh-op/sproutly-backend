@@ -3,16 +3,18 @@ import { E } from '../lib/errors.js';
 import { enqueue } from '../lib/queues.js';
 import { limit } from '../lib/ratelimit.js';
 import { LIMITS, RATE_LIMITS, cleanText, initialsOf, outfitName } from '../shared/rules.js';
-import type { ShowcasePost } from '../shared/types.js';
+import { SHOWCASE_DAILY_MAX, type ShowcaseActivity, type ShowcasePost } from '../shared/types.js';
 import { isPlus } from './entitlements.js';
+import { isOwnCloudinaryUrl } from '../lib/cloudinary.js';
+import { AUDIENCE } from './stories.js';
 
 interface PostRow {
-  id: string; user_id: string; caption: string; snapshot: ShowcasePost['snapshot']; cheer_count: number; created_at: Date;
+  id: string; user_id: string; caption: string; image_url: string | null; activity: ShowcaseActivity | null; snapshot: ShowcasePost['snapshot']; cheer_count: number; created_at: Date;
   display_name: string; avatar_color: string; avatar_url: string | null; plus_active: boolean | null; cheered: boolean; top: boolean;
 }
 
 const POST_SELECT = `
-  SELECT p.id, p.user_id, p.caption, p.snapshot, p.cheer_count, p.created_at, u.display_name, u.avatar_color, u.avatar_url, e.plus_active,
+  SELECT p.id, p.user_id, p.caption, p.image_url, p.activity, p.snapshot, p.cheer_count, p.created_at, u.display_name, u.avatar_color, u.avatar_url, e.plus_active,
          EXISTS (SELECT 1 FROM showcase_cheers sc WHERE sc.post_id = p.id AND sc.user_id = $1) AS cheered,
          EXISTS (SELECT 1 FROM weekly_top w WHERE w.post_id = p.id AND w.week_start = date_trunc('week', now())::date) AS top
     FROM showcase_posts p JOIN users u ON u.id = p.user_id LEFT JOIN entitlements e ON e.user_id = p.user_id`;
@@ -20,52 +22,44 @@ const POST_SELECT = `
 const toPost = (r: PostRow): ShowcasePost => ({
   id: r.id, userId: r.user_id, authorName: r.display_name, authorInitials: initialsOf(r.display_name), authorColor: r.avatar_color, authorUrl: r.avatar_url,
   // Gold card + badge only; no ranking boost for Plus (doc section 11).
-  authorIsPlus: !!r.plus_active, caption: r.caption, createdAt: r.created_at.toISOString(), snapshot: r.snapshot,
+  authorIsPlus: !!r.plus_active, caption: r.caption, imageUrl: r.image_url, activity: r.activity, createdAt: r.created_at.toISOString(), snapshot: r.snapshot,
   cheerCount: r.cheer_count, cheeredByMe: r.cheered, topOfWeek: r.top,
 });
 
+/** Up to SHOWCASE_DAILY_MAX posts in any 24 h: null while you can post, else when the next slot opens. */
 async function nextPostAt(userId: string): Promise<string | null> {
-  const last = await one<{ created_at: Date }>('SELECT created_at FROM showcase_posts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1', [userId]);
-  if (!last) return null;
-  const next = last.created_at.getTime() + LIMITS.showcaseCooldownMs;
-  return next > Date.now() ? new Date(next).toISOString() : null;
+  const recent = await q<{ created_at: Date }>(
+    `SELECT created_at FROM showcase_posts WHERE user_id = $1 AND created_at > now() - interval '24 hours' ORDER BY created_at ASC`, [userId],
+  );
+  if (recent.length < SHOWCASE_DAILY_MAX) return null;
+  return new Date(recent[0]!.created_at.getTime() + 24 * 3600 * 1000).toISOString();
 }
 
-/** Feed: friends' (and my) posts from the last 72 h newest first, then public top posts by cheers. */
+/** Feed: posts from the last 72 h by you, your friends and people you share a chat with, newest first. */
 export async function feed(userId: string): Promise<{ items: ShowcasePost[]; next: null; nextPostAt: string | null }> {
-  const friendsPosts = await q<PostRow>(
+  const rows = await q<PostRow>(
     `${POST_SELECT}
-      WHERE NOT p.hidden AND p.created_at > now() - interval '72 hours'
-        AND (p.user_id = $1
-             OR EXISTS (SELECT 1 FROM showcase_feed f WHERE f.user_id = $1 AND f.post_id = p.id)
-             OR EXISTS (SELECT 1 FROM friendships fr WHERE fr.user_id = $1 AND fr.friend_id = p.user_id AND fr.status = 'accepted'))
-      ORDER BY p.created_at DESC LIMIT 50`, [userId],
+      WHERE NOT p.hidden AND p.created_at > now() - interval '72 hours' AND ${AUDIENCE('p.user_id')}
+      ORDER BY p.created_at DESC LIMIT 100`, [userId],
   );
-  const seen = new Set(friendsPosts.map((p) => p.id));
-  const top = await q<PostRow>(
-    `${POST_SELECT}
-      WHERE NOT p.hidden AND p.created_at > now() - interval '72 hours'
-        AND NOT EXISTS (SELECT 1 FROM friendships b WHERE b.status = 'blocked' AND ((b.user_id = $1 AND b.friend_id = p.user_id) OR (b.user_id = p.user_id AND b.friend_id = $1)))
-      ORDER BY p.cheer_count DESC, p.created_at DESC LIMIT 50`, [userId],
-  );
-  const items = [...friendsPosts, ...top.filter((p) => !seen.has(p.id))].map(toPost);
-  return { items, next: null, nextPostAt: await nextPostAt(userId) };
+  return { items: rows.map(toPost), next: null, nextPostAt: await nextPostAt(userId) };
 }
 
 export async function getPost(userId: string, postId: string): Promise<ShowcasePost> {
-  const r = await one<PostRow>(`${POST_SELECT} WHERE p.id = $2 AND NOT p.hidden`, [userId, postId]);
+  const r = await one<PostRow>(`${POST_SELECT} WHERE p.id = $2 AND NOT p.hidden AND ${AUDIENCE('p.user_id')}`, [userId, postId]);
   if (!r) throw E.notFound('Post not found');
   return toPost(r);
 }
 
-/** One post per 24 h; the companion is snapshotted at post time. */
-export async function createPost(userId: string, rawCaption: string): Promise<ShowcasePost> {
-  const caption = cleanText(rawCaption).slice(0, 120);
-  if (!caption) throw E.badRequest('Add a caption');
+/** Up to SHOWCASE_DAILY_MAX posts per 24 h; the companion is snapshotted at post time. Photo optional; without one a caption is required. */
+export async function createPost(userId: string, rawCaption: string, imageUrl?: string | null, activity?: ShowcaseActivity | null): Promise<ShowcasePost> {
+  const caption = cleanText(rawCaption ?? '').slice(0, 120);
+  if (imageUrl && !isOwnCloudinaryUrl(imageUrl, userId, 'showcase')) throw E.badRequest('Upload the photo first, then post it.');
+  if (!caption && !imageUrl) throw E.badRequest('Add a photo or a caption');
   const id = await tx(async (c) => {
     await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`showcase:${userId}`]);
-    const recent = await one(`SELECT 1 FROM showcase_posts WHERE user_id = $1 AND created_at > now() - interval '24 hours'`, [userId], c);
-    if (recent) throw E.conflict('You can show off again tomorrow', { nextPostAt: await nextPostAt(userId) });
+    const recent = await one<{ n: number }>(`SELECT count(*)::int AS n FROM showcase_posts WHERE user_id = $1 AND created_at > now() - interval '24 hours'`, [userId], c);
+    if ((recent?.n ?? 0) >= SHOWCASE_DAILY_MAX) throw E.conflict(`You've shared ${SHOWCASE_DAILY_MAX} moments today. Come back tomorrow!`, { nextPostAt: await nextPostAt(userId) });
     const comp = await one<{ name: string; level: number; palette: string; equipped_outfit: string; signature_move: string }>(
       'SELECT name, level, palette, equipped_outfit, signature_move FROM companions WHERE user_id = $1', [userId], c,
     );
@@ -74,7 +68,7 @@ export async function createPost(userId: string, rawCaption: string): Promise<Sh
     const outfit = comp!.equipped_outfit;
     const label = !plus || outfit === 'aura' ? outfitName(outfit) : outfit === 'none' ? 'Glow aura' : `${outfitName(outfit)} + Glow aura`;
     const snapshot = { name: comp!.name, level: comp!.level, palette: comp!.palette, outfit: comp!.equipped_outfit, outfitLabel: label, signatureMove: comp!.signature_move };
-    const p = await one<{ id: string }>('INSERT INTO showcase_posts (user_id, caption, snapshot) VALUES ($1,$2,$3) RETURNING id', [userId, caption, JSON.stringify(snapshot)], c);
+    const p = await one<{ id: string }>('INSERT INTO showcase_posts (user_id, caption, image_url, activity, snapshot) VALUES ($1,$2,$3,$4,$5) RETURNING id', [userId, caption, imageUrl ?? null, activity ?? null, JSON.stringify(snapshot)], c);
     return p!.id;
   });
   await enqueue.fanout({ postId: id });
@@ -96,4 +90,10 @@ export async function cheer(userId: string, postId: string, on: boolean) {
   if (changed && on && post.user_id !== userId) await enqueue.push(`cheer:${postId}:${userId}`, { kind: 'cheer', postId, fromUserId: userId });
   const r = await one<{ cheer_count: number }>('SELECT cheer_count FROM showcase_posts WHERE id = $1', [postId]);
   return { cheerCount: r!.cheer_count, cheeredByMe: on };
+}
+
+/** Only the author can delete a post; it's gone from every feed (cheers and feed rows cascade). */
+export async function deletePost(userId: string, postId: string) {
+  const r = await q('DELETE FROM showcase_posts WHERE id = $1 AND user_id = $2 RETURNING id', [postId, userId]);
+  if (r.length === 0) throw E.notFound('Post not found');
 }

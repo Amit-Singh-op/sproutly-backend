@@ -120,8 +120,8 @@ export async function getChatStyle(userId: string): Promise<{ style: ChatStyle; 
 }
 
 export async function getMe(userId: string): Promise<Me> {
-  const u = await one<{ id: string; handle: string; display_name: string; avatar_color: string; avatar_url: string | null; timezone: string; read_receipts: boolean }>(
-    'SELECT id, handle, display_name, avatar_color, avatar_url, timezone, read_receipts FROM users WHERE id = $1', [userId],
+  const u = await one<{ id: string; handle: string; display_name: string; avatar_color: string; avatar_url: string | null; timezone: string; read_receipts: boolean; notifications_enabled: boolean }>(
+    'SELECT id, handle, display_name, avatar_color, avatar_url, timezone, read_receipts, notifications_enabled FROM users WHERE id = $1', [userId],
   );
   if (!u) throw E.unauthorized();
   const [companion, entitlements, style, quests, approved] = await Promise.all([
@@ -129,7 +129,7 @@ export async function getMe(userId: string): Promise<Me> {
   ]);
   return {
     id: u.id, handle: u.handle, displayName: u.display_name, initials: initialsOf(u.display_name), avatarColor: u.avatar_color, avatarUrl: u.avatar_url,
-    timezone: u.timezone, readReceipts: u.read_receipts, approved, companion, entitlements, chatStyle: style.style, quests,
+    timezone: u.timezone, readReceipts: u.read_receipts, notificationsEnabled: u.notifications_enabled, approved, companion, entitlements, chatStyle: style.style, quests,
   };
 }
 

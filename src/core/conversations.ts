@@ -33,7 +33,7 @@ interface SummaryRow {
 const SUMMARY_SQL = `
   SELECT c.id, c.kind, c.title, c.avatar_color, c.last_seq, c.last_message_at, c.member_count, c.plus_only,
          m.muted_until, m.pinned,
-         (SELECT count(*)::int FROM messages x WHERE x.conversation_id = c.id AND x.seq > m.read_seq
+         (SELECT count(*)::int FROM messages x WHERE x.conversation_id = c.id AND x.seq > m.read_seq AND x.created_at > now() - interval '3 days'
              AND x.sender_id IS DISTINCT FROM m.user_id AND x.deleted_at IS NULL AND x.type <> 'system') AS unread,
          o.id AS other_id, o.display_name AS other_name, o.avatar_color AS other_color, o.avatar_url AS other_avatar_url,
          lm.type AS lm_type, lm.body AS lm_body, lm.payload AS lm_payload, lm.deleted_at AS lm_deleted_at, lm.sender_id AS lm_sender,
@@ -44,7 +44,7 @@ const SUMMARY_SQL = `
       SELECT u.id, u.display_name, u.avatar_color, u.avatar_url FROM conversation_members m2 JOIN users u ON u.id = m2.user_id
        WHERE c.kind = 'dm' AND m2.conversation_id = c.id AND m2.user_id <> m.user_id LIMIT 1
     ) o ON TRUE
-    LEFT JOIN messages lm ON lm.id = c.last_message_id
+    LEFT JOIN messages lm ON lm.id = c.last_message_id AND lm.created_at > now() - interval '3 days'
     LEFT JOIN users su ON su.id = lm.sender_id
    WHERE m.user_id = $1`;
 
@@ -75,7 +75,9 @@ function toSummary(r: SummaryRow, viewerId: string): ConversationSummary {
 /** GET /conversations: pinned first, then by last message; archived hidden. */
 export async function listConversations(userId: string): Promise<ConversationSummary[]> {
   const rows = await q<SummaryRow>(`${SUMMARY_SQL} AND NOT m.archived ORDER BY m.pinned DESC, c.last_message_at DESC NULLS LAST, c.created_at DESC`, [userId]);
-  return rows.map((r) => toSummary(r, userId));
+  // Seed each DM's presence dot; live 'presence' events keep it current after this.
+  const online = await onlineMap([...new Set(rows.map((r) => r.other_id).filter((x): x is string => !!x))]);
+  return rows.map((r) => ({ ...toSummary(r, userId), otherOnline: r.other_id ? online[r.other_id] ?? false : false }));
 }
 
 export async function summaryFor(userId: string, conversationId: string, db?: Db): Promise<ConversationSummary | null> {

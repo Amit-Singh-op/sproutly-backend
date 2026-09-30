@@ -102,7 +102,7 @@ async function afterInsert(c: pg.PoolClient, row: MessageRow, senderName: string
 /** Doc 6.2 step 9: msg:new to every member + conv:update (with that member's unread and preview) to each member. */
 async function fanOut(msg: Message, kind: 'dm' | 'group', senderName: string) {
   const unread = await q<{ user_id: string; unread: number }>(
-    `SELECT m.user_id, (SELECT count(*)::int FROM messages x WHERE x.conversation_id = m.conversation_id AND x.seq > m.read_seq
+    `SELECT m.user_id, (SELECT count(*)::int FROM messages x WHERE x.conversation_id = m.conversation_id AND x.seq > m.read_seq AND x.created_at > now() - interval '3 days'
                           AND x.sender_id IS DISTINCT FROM m.user_id AND x.deleted_at IS NULL AND x.type <> 'system') AS unread
        FROM conversation_members m WHERE m.conversation_id = $1`, [msg.conversationId],
   );
@@ -194,13 +194,13 @@ export async function history(userId: string, conversationId: string, opts: { be
   const lim = Math.min(Math.max(opts.limit ?? LIMITS.historyPageDefault, 1), LIMITS.historyPageMax);
   let rows: MessageRow[];
   if (opts.afterSeq !== undefined) {
-    rows = await q<MessageRow>('SELECT * FROM messages WHERE conversation_id = $1 AND seq > $2 ORDER BY seq ASC LIMIT $3', [conversationId, opts.afterSeq, lim + 1]);
+    rows = await q<MessageRow>(`SELECT * FROM messages WHERE conversation_id = $1 AND seq > $2 AND created_at > now() - interval '3 days' ORDER BY seq ASC LIMIT $3`, [conversationId, opts.afterSeq, lim + 1]);
     const hasMore = rows.length > lim;
     return { messages: await toMessages(rows.slice(0, lim), userId), hasMore };
   }
   rows = opts.beforeSeq !== undefined
-    ? await q<MessageRow>('SELECT * FROM messages WHERE conversation_id = $1 AND seq < $2 ORDER BY seq DESC LIMIT $3', [conversationId, opts.beforeSeq, lim + 1])
-    : await q<MessageRow>('SELECT * FROM messages WHERE conversation_id = $1 ORDER BY seq DESC LIMIT $2', [conversationId, lim + 1]);
+    ? await q<MessageRow>(`SELECT * FROM messages WHERE conversation_id = $1 AND seq < $2 AND created_at > now() - interval '3 days' ORDER BY seq DESC LIMIT $3`, [conversationId, opts.beforeSeq, lim + 1])
+    : await q<MessageRow>(`SELECT * FROM messages WHERE conversation_id = $1 AND created_at > now() - interval '3 days' ORDER BY seq DESC LIMIT $2`, [conversationId, lim + 1]);
   const hasMore = rows.length > lim;
   return { messages: await toMessages(rows.slice(0, lim).reverse(), userId), hasMore };
 }
