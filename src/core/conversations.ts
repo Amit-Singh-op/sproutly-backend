@@ -3,6 +3,7 @@ import { toUser } from '../lib/emitter.js';
 import { E } from '../lib/errors.js';
 import { isOnline, onlineMap } from '../lib/presence.js';
 import { LIMITS, initialsOf, previewFor } from '../shared/rules.js';
+import { friendStreakView, utcDay } from '../shared/retention.js';
 import type { ConversationDetail, ConversationSummary, EventCard, GroupCard, MemberReceipt, Message } from '../shared/types.js';
 import { isPlus, requirePlus } from './entitlements.js';
 import { isBlocked } from './users.js';
@@ -28,6 +29,7 @@ interface SummaryRow {
   member_count: number; plus_only: boolean; muted_until: Date | null; pinned: boolean; unread: number;
   other_id: string | null; other_name: string | null; other_color: string | null; other_avatar_url: string | null;
   lm_type: Message['type'] | null; lm_body: string | null; lm_payload: Message['payload']; lm_deleted_at: Date | null; lm_sender: string | null; lm_sender_name: string | null;
+  fs_count: number | null; fs_last_day: string | null; fs_a_day: string | null; fs_b_day: string | null;
 }
 
 const SUMMARY_SQL = `
@@ -37,7 +39,8 @@ const SUMMARY_SQL = `
              AND x.sender_id IS DISTINCT FROM m.user_id AND x.deleted_at IS NULL AND x.type <> 'system') AS unread,
          o.id AS other_id, o.display_name AS other_name, o.avatar_color AS other_color, o.avatar_url AS other_avatar_url,
          lm.type AS lm_type, lm.body AS lm_body, lm.payload AS lm_payload, lm.deleted_at AS lm_deleted_at, lm.sender_id AS lm_sender,
-         su.display_name AS lm_sender_name
+         su.display_name AS lm_sender_name,
+         fs.count AS fs_count, fs.last_day AS fs_last_day, fs.a_day AS fs_a_day, fs.b_day AS fs_b_day
     FROM conversation_members m
     JOIN conversations c ON c.id = m.conversation_id
     LEFT JOIN LATERAL (
@@ -46,6 +49,8 @@ const SUMMARY_SQL = `
     ) o ON TRUE
     LEFT JOIN messages lm ON lm.id = c.last_message_id AND lm.created_at > now() - interval '3 days'
     LEFT JOIN users su ON su.id = lm.sender_id
+    LEFT JOIN friend_streaks fs ON c.kind = 'dm' AND o.id IS NOT NULL
+         AND fs.user_a = LEAST(m.user_id, o.id) AND fs.user_b = GREATEST(m.user_id, o.id)
    WHERE m.user_id = $1`;
 
 function toSummary(r: SummaryRow, viewerId: string): ConversationSummary {
@@ -69,6 +74,9 @@ function toSummary(r: SummaryRow, viewerId: string): ConversationSummary {
     otherUserId: r.other_id,
     muted: !!r.muted_until && r.muted_until.getTime() > Date.now(),
     pinned: r.pinned,
+    friendStreak: r.kind === 'dm' && r.other_id && r.fs_count !== null
+      ? friendStreakView({ count: r.fs_count, lastDay: r.fs_last_day, aDay: r.fs_a_day, bDay: r.fs_b_day }, viewerId < r.other_id ? 'a' : 'b', utcDay())
+      : null,
   };
 }
 
@@ -264,10 +272,14 @@ export async function patchMembership(userId: string, id: string, p: { mutedUnti
 }
 
 export async function currentEvent(): Promise<EventCard | null> {
-  const e = await one<{ id: string; title: string; description: string; reward_item_id: string | null }>(
-    'SELECT id, title, description, reward_item_id FROM events WHERE now() BETWEEN starts_at AND ends_at ORDER BY starts_at DESC LIMIT 1',
+  const e = await one<{ id: string; title: string; description: string; reward_item_id: string | null; ends_at: Date; drop_multiplier: string; emoji: string | null }>(
+    `SELECT id, title, description, reward_item_id, ends_at, drop_multiplier::text AS drop_multiplier, emoji
+       FROM events WHERE now() BETWEEN starts_at AND ends_at ORDER BY starts_at DESC LIMIT 1`,
   );
-  return e ? { id: e.id, title: e.title, description: e.description, rewardItemId: e.reward_item_id ?? '' } : null;
+  return e ? {
+    id: e.id, title: e.title, description: e.description, rewardItemId: e.reward_item_id ?? '',
+    endsAt: e.ends_at.toISOString(), dropMultiplier: Number(e.drop_multiplier) || 1, emoji: e.emoji,
+  } : null;
 }
 
 export { isOnline };

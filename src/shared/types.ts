@@ -113,6 +113,12 @@ export interface Companion {
   signatureMove: Mood;
   roomTheme: 'basic' | 'cabin';
   streak: number;
+  /** Banked streak shields (0..MAX_SHIELDS). Missing on old servers. */
+  shields?: number;
+  /** Last companion action (ISO). Drives how Mo looks when you come back and the local reminders. */
+  lastActionAt?: string | null;
+  /** Local day (YYYY-MM-DD) of the last action that counted for the streak. */
+  lastActiveDay?: string | null;
 }
 
 export interface AppConfig {
@@ -182,6 +188,8 @@ export interface ConversationSummary {
   otherOnline?: boolean;
   muted: boolean;
   pinned: boolean;
+  /** DMs: the chat streak with the other person (null when there is none). */
+  friendStreak?: FriendStreak | null;
 }
 
 export interface MemberReceipt {
@@ -310,6 +318,10 @@ export interface EventCard {
   title: string;
   description: string;
   rewardItemId: string;
+  /** Seasonal events: when it ends and how much daily-drop energy is multiplied while it runs. */
+  endsAt?: string;
+  dropMultiplier?: number;
+  emoji?: string | null;
 }
 
 export interface Me {
@@ -376,6 +388,18 @@ export interface RoomState { ownerId: UUID; night: boolean; music: boolean; visi
 
 export interface ActionResult {
   mood: Mood; line: string; gain: number; energy: number; level: number; leveledUp: boolean; streak: number; quests: Quest[];
+  /** First action after COMEBACK_AFTER_H away. */
+  comeback?: { energy: number; coins: number } | null;
+  /** Streak milestone reached by this action (granted once per account). */
+  milestone?: StreakMilestoneReward | null;
+  shields?: number;
+  /** A shield saved the streak on this action. */
+  shieldUsed?: boolean;
+  /** The incubating egg after this action (it warms once per local day). */
+  egg?: Egg | null;
+  coins?: number;
+  lastActionAt?: string;
+  lastActiveDay?: string;
 }
 
 // ---------- guestbook ----------
@@ -411,7 +435,12 @@ export interface DailyDrop {
   /** Today's reward once claimed. */
   today: DropReward | null;
 }
-export interface DropClaim { drop: DailyDrop; reward: DropReward; energy: number; level: number; leveledUp: boolean }
+export interface DropClaim {
+  drop: DailyDrop; reward: DropReward; energy: number; level: number; leveledUp: boolean;
+  /** Finishing the 7-day track banks a shield and starts an egg (if none is incubating); events multiply energy. */
+  bonus?: { shield: boolean; egg: boolean; eventMultiplier: number };
+  shields?: number;
+}
 
 export interface AvatarStageAction {
   conversationId: UUID;
@@ -491,6 +520,7 @@ export interface ServiceEvents {
   'style:update': UserStyle;
   'me:entitlements': Entitlements;
   'quest:update': { quests: Quest[]; energy: number; level: number };
+  'activity:new': ActivityItem;
   'wallet:update': { coins: number };
   'room:state': RoomState;
   'stage:action': AvatarStageAction;
@@ -499,3 +529,75 @@ export interface ServiceEvents {
   connection: { connected: boolean };
 }
 export type EventName = keyof ServiceEvents;
+
+// ---------- retention (rules in retention.ts) ----------
+export interface StreakMilestoneReward { day: number; coins: number; itemId?: string; shields?: number }
+
+/** How Mo feels about the time since your last visit. Only changes looks and words, never takes anything away. */
+export type CompanionNeed = 'content' | 'peckish' | 'lonely' | 'missing';
+
+export interface FriendStreak {
+  count: number;
+  /** Nobody has kept it going today yet (UTC day); it ends at UTC midnight. */
+  atRisk: boolean;
+  sentToday: boolean;
+  theyToday: boolean;
+}
+
+export const ACTIVITY_KINDS = ['guestbook', 'room_visit', 'level_up', 'streak_milestone', 'friend_streak', 'egg_hatched'] as const;
+export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
+export interface ActivityItem {
+  id: UUID;
+  kind: ActivityKind;
+  actor: { id: UUID; displayName: string; initials: string; avatarColor: string; palette: PaletteId } | null;
+  data: Record<string, number | string>;
+  text: string;
+  createdAt: string;
+  seen: boolean;
+}
+
+export interface Egg {
+  id: UUID;
+  /** Distinct local days it has been warmed (a companion action that day). */
+  progress: number;
+  target: number;
+  warmedToday: boolean;
+  ready: boolean;
+  source: 'starter' | 'drop' | 'shop';
+}
+export interface EggHatch { reward: { coins: number; energy: number; itemId: string | null }; energy: number; level: number; leveledUp: boolean; coins: number }
+
+export type ShopOfferId = 'scarf' | 'flower' | 'shield' | 'egg';
+export interface ShopOffer {
+  id: ShopOfferId;
+  kind: 'item' | 'shield' | 'egg';
+  name: string;
+  description: string;
+  price: number;
+  basePrice: number;
+  /** This week's deal (discounted). */
+  featured: boolean;
+  /** False when owned / shields full / an egg is already incubating. */
+  available: boolean;
+  reason?: string;
+}
+export interface Shop { offers: ShopOffer[]; coins: number; shields: number; endsAt: string }
+export interface ShopPurchase { shop: Shop; coins: number; shields: number; itemId: string | null; egg: Egg | null }
+
+export const ANALYTICS_EVENT_MAX = 50;
+export interface AnalyticsEvent { name: string; props?: Record<string, string | number | boolean | null>; at: string }
+
+export interface QuestChest { day: string; ready: boolean; claimed: boolean; done: number; total: number; reward: { coins: number; energy: number } }
+export interface QuestChestClaim { chest: QuestChest; coins: number; energy: number; level: number; leveledUp: boolean }
+/** The last 7 local days (today included). */
+export interface WeeklyRecap {
+  from: string;
+  to: string;
+  daysWithCompanion: number;
+  energyEarned: number;
+  coinsEarned: number;
+  friendVisits: number;
+  guestbookNotes: number;
+  chatStreakBest: number;
+  streak: number;
+}

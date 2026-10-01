@@ -6,6 +6,9 @@ import { getWallet } from '../../core/ledger.js';
 import { catalog, markSeen } from '../../core/misc.js';
 import { ChatStyleBody, getStyle, saveStyle } from '../../core/styles.js';
 import { getCompanion } from '../../core/users.js';
+import { getEgg, hatchEgg } from '../../core/eggs.js';
+import { claimChest, getChest, weeklyRecap } from '../../core/engagement.js';
+import { buy, getShop } from '../../core/shop.js';
 import { CATALOG_SLOTS, COMPANION_ACTIONS, MOODS, OUTFITS, PALETTE_IDS } from '../../shared/types.js';
 
 const Patch = z.object({
@@ -27,6 +30,22 @@ export async function companionRoutes(app: FastifyInstance) {
   app.patch('/companion', async (req) => patchCompanion(req.userId, Patch.parse(req.body) as any));
   app.post('/companion/actions', async (req) => companionAction(req.userId, z.object({ action: z.enum(COMPANION_ACTIONS) }).parse(req.body).action));
   app.get('/quests/today', async (req) => ensureQuests(req.userId));
+
+  // Daily quest chest and the weekly recap.
+  app.get('/quests/chest', async (req) => getChest(req.userId));
+  app.post('/quests/chest/claim', async (req) => claimChest(req.userId));
+  app.get('/recap/week', async (req) => weeklyRecap(req.userId));
+
+  // Eggs: warmed by daily companion actions, hatched when ready.
+  app.get('/egg', async (req) => ({ egg: await getEgg(req.userId) }));
+  app.post('/egg/hatch', async (req) => hatchEgg(req.userId));
+
+  // Coin shop (weekly featured deal).
+  app.get('/shop', async (req) => getShop(req.userId));
+  app.post('/shop/buy', async (req) => {
+    const { offerId } = z.object({ offerId: z.enum(['scarf', 'flower', 'shield', 'egg']) }).parse(req.body);
+    return buy(req.userId, offerId);
+  });
 
   // Catalog (Phase 0 + legacy)
   app.get('/catalog', async (req) => {

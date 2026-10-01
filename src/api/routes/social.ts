@@ -9,6 +9,7 @@ import { LIMITS } from '../../shared/rules.js';
 import { addComment, cheer, createPost, deleteComment, deletePost, feed, getPost, listComments } from '../../core/showcase.js';
 import { NewStoryBody, createStory, deleteStory, listStories, viewStory } from '../../core/stories.js';
 import { addFriend, blockUser, friends, removeFriend, search } from '../../core/users.js';
+import { listActivity, markActivitySeen } from '../../core/activity.js';
 
 const Id = z.object({ id: z.string().uuid() });
 const UserId = z.object({ userId: z.string().uuid() });
@@ -73,6 +74,14 @@ export async function socialRoutes(app: FastifyInstance) {
   });
   app.post('/rooms/:userId/guestbook', async (req) => signGuestbook(req.userId, UserId.parse(req.params).userId,
     z.object({ sticker: z.enum(GUESTBOOK_STICKERS), note: z.string().max(LIMITS.guestbookNoteMax * 2).optional() }).parse(req.body)));
+
+  // Friend activity feed
+  app.get('/activity', async (req) => listActivity(req.userId));
+  app.post('/activity/seen', async (req) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).max(100).optional() }).parse(req.body ?? {});
+    await markActivitySeen(req.userId, ids);
+    return { ok: true };
+  });
 
   // Daily drop
   app.get('/drops/today', async (req) => getDrop(req.userId));

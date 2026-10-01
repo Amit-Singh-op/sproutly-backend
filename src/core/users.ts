@@ -70,6 +70,9 @@ interface CompanionRow {
   signature_move: Mood;
   room_theme: 'basic' | 'cabin';
   streak: number;
+  shields?: number | null;
+  last_action_at?: Date | null;
+  last_active_day?: string | null;
 }
 export const companionFromRow = (r: CompanionRow): Companion => {
   let equippedSlots: EquippedSlots | undefined = undefined;
@@ -93,6 +96,9 @@ export const companionFromRow = (r: CompanionRow): Companion => {
     signatureMove: r.signature_move,
     roomTheme: r.room_theme,
     streak: r.streak,
+    shields: r.shields ?? 0,
+    lastActionAt: r.last_action_at ? r.last_action_at.toISOString() : null,
+    lastActiveDay: r.last_active_day ?? null,
   };
 };
 

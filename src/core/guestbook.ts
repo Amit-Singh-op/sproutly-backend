@@ -6,6 +6,8 @@ import { localDay } from '../lib/time.js';
 import { LIMITS, cleanText, initialsOf } from '../shared/rules.js';
 import type { GuestbookEntry, GuestbookSticker, PaletteId } from '../shared/types.js';
 import { isBlocked } from './users.js';
+import { notifyActivity } from './activity.js';
+import { recordSocialQuest } from './companion.js';
 
 interface EntryRow {
   id: string; owner_id: string; author_id: string; sticker: GuestbookSticker; note: string | null; palette: PaletteId; created_at: Date;
@@ -54,5 +56,7 @@ export async function signGuestbook(authorId: string, ownerId: string, p: { stic
   const entry = toEntry((await one<EntryRow>(`${SELECT} WHERE g.id = $1`, [ins.id]))!);
   toUser(ownerId, 'guestbook:new', entry);
   await enqueue.push(`guestbook:${ins.id}`, { kind: 'guestbook', entryId: ins.id });
+  await notifyActivity([ownerId], authorId, 'guestbook', {}, `guestbook:${ins.id}`);
+  await recordSocialQuest(authorId, 'guestbook', ownerId);
   return entry;
 }

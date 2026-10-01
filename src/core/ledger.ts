@@ -1,6 +1,7 @@
+import type pg from 'pg';
 import { one, q, tx } from '../db/pool.js';
 import { toUser } from '../lib/emitter.js';
-import { E } from '../lib/errors.js';
+import { AppError, E } from '../lib/errors.js';
 import { enqueue } from '../lib/queues.js';
 import { XP_DAILY_CAPS } from '../shared/rules.js';
 import type { CoinTransaction } from '../shared/types.js';
@@ -38,49 +39,53 @@ export async function getWallet(userId: string): Promise<{ coins: number; histor
   return { coins, history };
 }
 
+/**
+ * Change the balance inside the caller's transaction (callers emit 'wallet:update' after commit).
+ * With a referenceId the change happens at most once: a repeat returns the earlier result with `applied: false`.
+ */
+export async function adjustCoinsTx(
+  c: pg.PoolClient,
+  userId: string,
+  amount: number,
+  source: string,
+  referenceId?: string,
+): Promise<{ coins: number; transactionId: string; applied: boolean }> {
+  // Lock the balance first: concurrent calls with the same referenceId then see each other's row instead of
+  // both passing the idempotency check and the loser failing on the unique constraint.
+  const comp = await one<{ coins: number }>('SELECT coins FROM companions WHERE user_id = $1 FOR UPDATE', [userId], c);
+  if (!comp) throw E.notFound('Companion not found');
+  if (referenceId) {
+    const existing = await one<{ id: string; balance_after: number }>(
+      'SELECT id, balance_after FROM coin_transactions WHERE user_id = $1 AND reference_id = $2',
+      [userId, referenceId],
+      c,
+    );
+    if (existing) return { coins: comp.coins, transactionId: existing.id, applied: false };
+  }
+
+  const next = comp.coins + amount;
+  if (next < 0) throw new AppError(400, 'INSUFFICIENT_COINS', "You don't have enough coins yet");
+
+  await q('UPDATE companions SET coins = $2, updated_at = now() WHERE user_id = $1', [userId, next], c);
+  const inserted = await one<{ id: string }>(
+    `INSERT INTO coin_transactions (user_id, amount, balance_after, source, reference_id)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id`,
+    [userId, amount, next, source, referenceId ?? null],
+    c,
+  );
+  return { coins: next, transactionId: inserted!.id, applied: true };
+}
+
 export async function adjustCoins(
   userId: string,
   amount: number,
   source: string,
   referenceId?: string,
 ): Promise<{ coins: number; transactionId: string }> {
-  const result = await tx(async (c) => {
-    // Lock the balance first: concurrent calls with the same referenceId then see each other's row instead of
-    // both passing the idempotency check and the loser failing on the unique constraint.
-    const comp = await one<{ coins: number }>('SELECT coins FROM companions WHERE user_id = $1 FOR UPDATE', [userId], c);
-    if (!comp) throw E.notFound('Companion not found');
-    if (referenceId) {
-      const existing = await one<{ id: string; balance_after: number }>(
-        'SELECT id, balance_after FROM coin_transactions WHERE user_id = $1 AND reference_id = $2',
-        [userId, referenceId],
-        c,
-      );
-      if (existing) {
-        return { coins: existing.balance_after, transactionId: existing.id };
-      }
-    }
-
-    const current = comp.coins;
-    const next = current + amount;
-    if (next < 0) {
-      throw E.badRequest('Insufficient coins balance');
-    }
-
-    await q('UPDATE companions SET coins = $2, updated_at = now() WHERE user_id = $1', [userId, next], c);
-
-    const inserted = await one<{ id: string }>(
-      `INSERT INTO coin_transactions (user_id, amount, balance_after, source, reference_id)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id`,
-      [userId, amount, next, source, referenceId ?? null],
-      c,
-    );
-
-    return { coins: next, transactionId: inserted!.id };
-  });
-
+  const result = await tx((c) => adjustCoinsTx(c, userId, amount, source, referenceId));
   toUser(userId, 'wallet:update', { coins: result.coins });
-  return result;
+  return { coins: result.coins, transactionId: result.transactionId };
 }
 
 export async function grantXp(

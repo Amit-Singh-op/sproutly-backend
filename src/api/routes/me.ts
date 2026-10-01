@@ -10,6 +10,7 @@ import { LIMITS, RATE_LIMITS } from '../../shared/rules.js';
 import { limit } from '../../lib/ratelimit.js';
 import { E } from '../../lib/errors.js';
 import { UPLOAD_FOLDERS, isOwnCloudinaryUrl, uploadSignature } from '../../lib/cloudinary.js';
+import { AnalyticsBody, recordEvents } from '../../core/analytics.js';
 
 const PatchMe = z.object({
   displayName: z.string().trim().min(1).max(40).optional(),
@@ -75,6 +76,12 @@ export async function meRoutes(app: FastifyInstance) {
   app.get('/users/styles', async (req) => {
     const ids = String((req.query as { ids?: string }).ids ?? '').split(',').map((s) => s.trim()).filter((s) => /^[0-9a-f-]{36}$/i.test(s));
     return userStyles([...new Set(ids)].slice(0, LIMITS.userStylesMax));
+  });
+
+  /** First-party usage events, batched by the app. */
+  app.post('/analytics', async (req) => {
+    await limit(`analytics:${req.userId}`, RATE_LIMITS.analyticsPerUser, 'Too many events.');
+    return { accepted: await recordEvents(req.userId, AnalyticsBody.parse(req.body)) };
   });
 
   app.post('/reports', async (req) => {

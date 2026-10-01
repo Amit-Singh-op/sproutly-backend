@@ -30,6 +30,7 @@ export const RATE_LIMITS = {
   commentsPerUser: { points: 20, windowS: 60 },
   otpPerHour: { points: 5, windowS: 3600 },
   uploadsPerUser: { points: 30, windowS: 3600 },
+  analyticsPerUser: { points: 60, windowS: 60 },
 } as const;
 
 /** App Store / Play products and RevenueCat identifiers (doc section 5). */

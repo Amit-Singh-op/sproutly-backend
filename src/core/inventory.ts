@@ -1,3 +1,4 @@
+import type pg from 'pg';
 import { one, q } from '../db/pool.js';
 import { toUsers } from '../lib/emitter.js';
 import { AppError, E } from '../lib/errors.js';
@@ -66,6 +67,16 @@ export async function markInventorySeen(userId: string, itemIds: string[]): Prom
     'UPDATE user_inventory SET seen = TRUE WHERE user_id = $1 AND item_id = ANY($2::text[])',
     [userId, itemIds],
   );
+}
+
+/** Inside a transaction. Returns false when the user already had the item (nothing changes then). */
+export async function grantInventoryItemTx(c: pg.PoolClient, userId: string, itemId: string, source: string): Promise<boolean> {
+  const r = await c.query(
+    `INSERT INTO user_inventory (user_id, item_id, count, source, seen, acquired_at)
+     VALUES ($1, $2, 1, $3, FALSE, now()) ON CONFLICT (user_id, item_id) DO NOTHING`,
+    [userId, itemId, source],
+  );
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function grantInventoryItem(userId: string, itemId: string, source = 'starter', count = 1): Promise<void> {

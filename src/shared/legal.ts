@@ -13,10 +13,12 @@ export const PRIVACY: LegalDoc = {
   sections: [
     ['What we collect',
       '• Account: your email address (to sign you in with a one-time code), display name, username, avatar colour, optional profile photo, and your time zone (for daily quests and streaks).\n'
-      + '• Your companion: its name, level, energy, outfits, moves, streak, room settings and chat-style choices.\n'
+      + '• Your companion: its name, level, energy, coins, outfits, moves, streak and streak shields, eggs, room settings and chat-style choices, and when you last looked after it.\n'
       + '• Things you create: chat messages (including stickers, emojis and polls) and poll votes, 24-hour stories (photos or text), Show off posts (photos, captions and the activity you tag), cheers, groups you create or join, friends, and people you block or report.\n'
       + '• Photos: only the ones you choose to upload as your profile photo, a story or a Show off post. We never access your photo library or camera except when you pick or take a photo.\n'
-      + '• Activity: whether you are online, and when you have a chat open, so friends can see you in its room. Also who viewed your stories.\n'
+      + '• Activity: whether you are online, and when you have a chat open, so friends can see you in its room. Also who viewed your stories, and chat streaks (whether you and a friend both messaged each other on a given day).\n'
+      + '• Friend updates: when a friend visits your room, signs your guestbook, levels up or reaches a streak milestone, a short note about it is shown to you (and yours to your friends) in the app.\n'
+      + '• App usage: which features you use and when you open the app (for example "opened the shop" or "claimed a daily gift"), with your platform and app version. We use this only to understand and improve Sproutly; it is never sold or used for ads, and no third-party analytics service receives it.\n'
       + '• Device: a push-notification token, your platform (Android/iOS) and app version, so we can send the notifications you have turned on.\n'
       + '• Purchases: if you subscribe to Sproutly Plus, your plan and renewal date. Payment is handled by Google Play or the App Store; we never see your card details.\n'
       + '• Technical: server logs (such as IP address and request time) kept briefly for security and to fix problems.'],
@@ -33,13 +35,14 @@ export const PRIVACY: LegalDoc = {
       '• Chat messages are deleted automatically 3 days after they are sent, in every chat.\n'
       + '• Stories disappear after 24 hours and are then deleted.\n'
       + '• Show off posts appear in feeds for 72 hours; you can delete your own at any time.\n'
+      + '• Friend updates are kept for 30 days and app usage records for 180 days, then deleted.\n'
       + '• Everything else (profile, companion, friends, settings) is kept while your account exists.\n'
       + '• When you delete your account we delete your profile, companion, friends, posts, stories, sessions and devices, and messages you sent are wiped.\n'
       + '• Server logs are kept for up to 30 days. Copies in our providers\' backups expire on their normal schedules.'],
     ['Security',
       'Data is encrypted in transit (HTTPS). Sign-in codes and session tokens are stored only as secure hashes. Photos can only be uploaded through a signed, one-time permission from our server.'],
     ['Your choices and rights',
-      `• Change your display name and profile photo in the app at any time.\n• Turn notifications on or off (Profile → Notifications). Notifications are only sent for private chats and when someone @mentions you in a group.\n• Turn off read receipts or mute chats in the app.\n• Delete your own stories and Show off posts at any time.\n• Block and report people, messages, stories and posts in the app.\n• Delete your account in the app (Profile → Delete account) or at https://sproutly-backend.onrender.com/delete-account.\n• Ask for a copy of your data or any other privacy request by emailing ${CONTACT_EMAIL}.`],
+      `• Change your display name and profile photo in the app at any time.\n• Turn notifications on or off (Profile → Notifications). Notifications are only sent for private chats and when someone @mentions you in a group.\n• Turn reminders on or off (Profile → Reminders). Reminders (daily gift, streak about to end, coming back after a break) are scheduled on your phone, not sent by our servers.\n• Turn off read receipts or mute chats in the app.\n• Delete your own stories and Show off posts at any time.\n• Block and report people, messages, stories and posts in the app.\n• Delete your account in the app (Profile → Delete account) or at https://sproutly-backend.onrender.com/delete-account.\n• Ask for a copy of your data or any other privacy request by emailing ${CONTACT_EMAIL}.`],
     ['Children',
       `Sproutly is not directed to children under 13 and we do not knowingly collect their data. If you believe a child under 13 has an account, contact ${CONTACT_EMAIL} and we will delete it.`],
     ['Changes',

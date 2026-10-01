@@ -5,6 +5,9 @@ import { log } from '../lib/log.js';
 import { isViewing } from '../lib/presence.js';
 import type { PushJob } from '../lib/queues.js';
 import { previewFor } from '../shared/rules.js';
+import { notifyFriends } from '../core/activity.js';
+import { payLevelCoins } from '../core/engagement.js';
+import { levelCoins } from '../shared/retention.js';
 import type { Message } from '../shared/types.js';
 
 const auth = config.FCM_PROJECT_ID
@@ -98,7 +101,13 @@ export async function handlePush(job: PushJob) {
     return;
   }
   // Cheers, room invites, guestbook visits and level-ups show in the app only; they never push.
-  if (job.kind === 'cheer' || job.kind === 'invite' || job.kind === 'guestbook' || job.kind === 'level') return;
+  // A level-up does go to friends' activity feeds (the level job is the one place every level-up passes through).
+  if (job.kind === 'level') {
+    await payLevelCoins(job.userId, job.level, levelCoins(job.level));
+    await notifyFriends(job.userId, 'level_up', { level: job.level }, `level:${job.userId}:${job.level}`);
+    return;
+  }
+  if (job.kind === 'cheer' || job.kind === 'invite' || job.kind === 'guestbook') return;
 }
 
 const EMOJI_FALLBACK: Record<string, string> = {
