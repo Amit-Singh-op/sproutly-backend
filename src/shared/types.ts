@@ -190,7 +190,11 @@ export interface ConversationSummary {
   pinned: boolean;
   /** DMs: the chat streak with the other person (null when there is none). */
   friendStreak?: FriendStreak | null;
+  /** Groups: how many it holds (memberCount is live via 'group:count'). */
+  maxMembers?: number;
 }
+/** A public group found by search, with its live head count. */
+export interface GroupHit { id: UUID; title: string; memberCount: number; maxMembers?: number; full?: boolean; plusOnly?: boolean; joined?: boolean }
 
 export interface MemberReceipt {
   userId: UUID;
@@ -311,7 +315,12 @@ export interface GroupCard {
   initials: string;
   plusOnly: boolean;
   joined: boolean;
+  /** How many people the group holds; `full` = no room left right now (live via 'group:count'). */
+  maxMembers?: number;
+  full?: boolean;
 }
+/** A public group's live head count (sent to people looking at the group list, and to its members). */
+export interface GroupCount { id: UUID; memberCount: number; maxMembers: number; full: boolean }
 
 export interface EventCard {
   id: UUID;
@@ -527,6 +536,8 @@ export interface ServiceEvents {
   'plaza:emote': { spot: PlazaSpotId; userId: UUID; emote: PlazaEmote };
   'plaza:say': { spot: PlazaSpotId; line: PlazaLine };
   'plaza:kick': { spot: PlazaSpotId; userId: UUID; ball: PlazaBall };
+  'plaza:counts': PlazaSpotInfo[];
+  'group:count': GroupCount;
   'wallet:update': { coins: number };
   'room:state': RoomState;
   'stage:action': AvatarStageAction;

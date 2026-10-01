@@ -17,6 +17,7 @@ import { ONLINE_SET, dropPresence, isOnline, touchPresence, viewingKey } from '.
 import { redis } from '../lib/redis.js';
 import { LIMITS } from '../shared/rules.js';
 import { registerPlaza } from './plaza.js';
+import { takeSeat } from '../lib/seats.js';
 import { STAGE_CAPACITY, type RoomState, type SendAck, type StageOccupant } from '../shared/types.js';
 
 const HEARTBEAT_MS = 25_000;
@@ -152,13 +153,18 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
     const userId = socket.data.userId;
     socket.data.rooms = new Set();
     socket.data.convs = new Set();
-    await socket.join(rooms.user(userId));
-
-    const wasOnline = await isOnline(userId);
-    await touchPresence(userId, socket.id);
-    if (!wasOnline) await broadcastPresence(userId, true);
+    // Every handler is registered before the first await. The app sends conv:join / plaza:enter / sync:hello the
+    // moment it connects (and again after every reconnect); socket.io silently drops events that arrive before their
+    // handler exists, which used to lose those joins (no live messages until the screen was reopened).
+    void socket.join(rooms.user(userId));
     const beat = setInterval(() => { void touchPresence(userId, socket.id); }, HEARTBEAT_MS);
-    registerPlaza(io, socket);
+    // Presence setup runs alongside; handlers that need us marked online (room occupancy) wait for it first.
+    const ready: Promise<void> = (async () => {
+      const wasOnline = await isOnline(userId);
+      await touchPresence(userId, socket.id);
+      if (!wasOnline) await broadcastPresence(userId, true);
+    })().catch((err) => { log.error({ err }, 'socket presence setup failed'); });
+    registerPlaza(io, socket, ready);
 
     // ---- messages ----
     socket.on('msg:send', async (input: unknown, ack?: (a: SendAck) => void) => {
@@ -177,6 +183,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
 
     // ---- open chat ----
     socket.on('conv:join', (p: unknown) => wrap(async () => {
+      await ready;
       const { conversationId } = ConvRef.parse(p);
       await requireMember(userId, conversationId);
       await socket.join(rooms.conv(conversationId));
@@ -186,6 +193,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
     }));
     // Waiting outside a full room: the app asks again when it sees a spot open.
     socket.on('stage:enter', (p: unknown) => wrap(async () => {
+      await ready;
       const { conversationId } = ConvRef.parse(p);
       if (!socket.data.convs.has(conversationId)) return;
       await enterStage(conversationId);
@@ -209,6 +217,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
 
     // ---- reconnect sync (doc 6.9) ----
     socket.on('sync:hello', (p: unknown) => wrap(async () => {
+      await ready;
       const { conversations } = Hello.parse(p);
       if (conversations.length === 0) return;
       const rows = await q<{ id: string; last_seq: number }>(
@@ -242,13 +251,14 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
     const enterStage = async (conversationId: string) => {
       const key = stageKey(conversationId);
       if (!(await redis.hexists(key, userId))) {
-        const inside = await stageOccupants(conversationId);
-        if (inside.length >= STAGE_CAPACITY) {
+        await stageOccupants(conversationId); // clears out people whose connection died, so they don't hold seats
+        // Atomic: two people opening the chat at the same moment can't both take the last seat.
+        if (!(await takeSeat(key, userId, JSON.stringify({ userId } satisfies StageOccupant), STAGE_CAPACITY))) {
+          const inside = await stageOccupants(conversationId);
           socket.emit('stage:full', { conversationId, capacity: STAGE_CAPACITY, count: inside.length });
           socket.emit('stage:presence', { conversationId, occupants: inside });
           return;
         }
-        await redis.hset(key, userId, JSON.stringify({ userId } satisfies StageOccupant));
       }
       await redis.expire(key, 24 * 60 * 60);
       await emitStage(conversationId);
@@ -287,8 +297,16 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
       });
     }));
 
+    // ---- live group counts (the public group list) ----
+    socket.on('discover:watch', (p: unknown) => wrap(async () => {
+      const { on } = z.object({ on: z.boolean() }).parse(p);
+      if (on) await socket.join(rooms.discover);
+      else await socket.leave(rooms.discover);
+    }));
+
     // ---- companion rooms ----
     socket.on('room:join', (p: unknown) => wrap(async () => {
+      await ready;
       const { ownerId } = OwnerRef.parse(p);
       await socket.join(rooms.room(ownerId));
       socket.data.rooms.add(ownerId);

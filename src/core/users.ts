@@ -244,8 +244,16 @@ export async function search(userId: string, term: string) {
         AND NOT EXISTS (SELECT 1 FROM friendships f WHERE f.status = 'blocked' AND ((f.user_id = u.id AND f.friend_id = $1) OR (f.user_id = $1 AND f.friend_id = u.id)))
       ORDER BY (u.handle ILIKE $3) DESC, u.display_name LIMIT 20`, [userId, like, `${term}%`],
   );
-  const groups = await q<{ id: string; title: string; member_count: number }>(
-    `SELECT id, title, member_count FROM conversations WHERE kind = 'group' AND is_public AND title ILIKE $1 ORDER BY member_count DESC LIMIT 20`, [like],
+  const groups = await q<{ id: string; title: string; member_count: number; max_members: number; plus_only: boolean; joined: boolean }>(
+    `SELECT c.id, c.title, c.member_count, c.max_members, c.plus_only,
+            EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.user_id = $2) AS joined
+       FROM conversations c WHERE c.kind = 'group' AND c.is_public AND c.title ILIKE $1 ORDER BY c.member_count DESC LIMIT 20`, [like, userId],
   );
-  return { people: await toPeople(people), groups: groups.map((g) => ({ id: g.id, title: g.title, memberCount: g.member_count })) };
+  return {
+    people: await toPeople(people),
+    groups: groups.map((g) => ({
+      id: g.id, title: g.title, memberCount: g.member_count, maxMembers: g.max_members, full: g.member_count >= g.max_members,
+      plusOnly: g.plus_only, joined: g.joined,
+    })),
+  };
 }

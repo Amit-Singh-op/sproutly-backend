@@ -15,6 +15,10 @@ export const rooms = {
   user: (id: string) => `user:${id}`,
   conv: (id: string) => `conv:${id}`,
   room: (ownerId: string) => `room:${ownerId}`,
+  /** Everyone looking at the public group list (live member counts). */
+  discover: 'discover',
+  /** Everyone in the Plaza tab (live spot counts). */
+  plazaLobby: 'plaza-lobby',
 };
 
 export function toUser<E extends Ev>(userId: string, event: E, payload: ServiceEvents[E]) {

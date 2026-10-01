@@ -1,6 +1,6 @@
 import { one, q, tx, type Db } from '../db/pool.js';
-import { toUser } from '../lib/emitter.js';
-import { E } from '../lib/errors.js';
+import { rooms, toRoom, toUser, toUsers } from '../lib/emitter.js';
+import { AppError, E } from '../lib/errors.js';
 import { isOnline, onlineMap } from '../lib/presence.js';
 import { LIMITS, initialsOf, previewFor } from '../shared/rules.js';
 import { friendStreakView, utcDay } from '../shared/retention.js';
@@ -26,14 +26,14 @@ export async function memberIds(conversationId: string, db?: Db): Promise<string
 
 interface SummaryRow {
   id: string; kind: 'dm' | 'group'; title: string | null; avatar_color: string; last_seq: number; last_message_at: Date | null;
-  member_count: number; plus_only: boolean; muted_until: Date | null; pinned: boolean; unread: number;
+  member_count: number; max_members: number; plus_only: boolean; muted_until: Date | null; pinned: boolean; unread: number;
   other_id: string | null; other_name: string | null; other_color: string | null; other_avatar_url: string | null;
   lm_type: Message['type'] | null; lm_body: string | null; lm_payload: Message['payload']; lm_deleted_at: Date | null; lm_sender: string | null; lm_sender_name: string | null;
   fs_count: number | null; fs_last_day: string | null; fs_a_day: string | null; fs_b_day: string | null;
 }
 
 const SUMMARY_SQL = `
-  SELECT c.id, c.kind, c.title, c.avatar_color, c.last_seq, c.last_message_at, c.member_count, c.plus_only,
+  SELECT c.id, c.kind, c.title, c.avatar_color, c.last_seq, c.last_message_at, c.member_count, c.max_members, c.plus_only,
          m.muted_until, m.pinned,
          (SELECT count(*)::int FROM messages x WHERE x.conversation_id = c.id AND x.seq > m.read_seq AND x.created_at > now() - interval '3 days'
              AND x.sender_id IS DISTINCT FROM m.user_id AND x.deleted_at IS NULL AND x.type <> 'system') AS unread,
@@ -70,6 +70,7 @@ function toSummary(r: SummaryRow, viewerId: string): ConversationSummary {
       : null,
     unread: r.unread,
     memberCount: r.member_count,
+    ...(r.kind === 'group' ? { maxMembers: r.max_members } : {}),
     plusOnly: r.plus_only,
     otherUserId: r.other_id,
     muted: !!r.muted_until && r.muted_until.getTime() > Date.now(),
@@ -78,6 +79,19 @@ function toSummary(r: SummaryRow, viewerId: string): ConversationSummary {
       ? friendStreakView({ count: r.fs_count, lastDay: r.fs_last_day, aDay: r.fs_a_day, bDay: r.fs_b_day }, viewerId < r.other_id ? 'a' : 'b', utcDay())
       : null,
   };
+}
+
+/** A public group's live head count, to everyone looking at the group list and to its members. */
+export async function broadcastGroupCount(id: string) {
+  const c = await one<{ member_count: number; max_members: number; is_public: boolean; kind: string }>(
+    'SELECT member_count, max_members, is_public, kind FROM conversations WHERE id = $1', [id],
+  );
+  if (!c || c.kind !== 'group') return;
+  const payload = { id, memberCount: c.member_count, maxMembers: c.max_members, full: c.member_count >= c.max_members };
+  if (c.is_public) toRoom(rooms.discover, 'group:count', payload);
+  toRoom(rooms.conv(id), 'group:count', payload);
+  // Members see it in their chat list too (not only while the chat is open).
+  toUsers(await memberIds(id), 'group:count', payload);
 }
 
 /** GET /conversations: pinned first, then by last message; archived hidden. */
@@ -204,8 +218,8 @@ export async function createGroup(userId: string, g: { title: string; category: 
 }
 
 export async function discoverGroups(userId: string, category?: string): Promise<{ items: GroupCard[]; next: null }> {
-  const rows = await q<{ id: string; title: string; description: string | null; category: string | null; member_count: number; avatar_color: string; plus_only: boolean; joined: boolean }>(
-    `SELECT c.id, c.title, c.description, c.category, c.member_count, c.avatar_color, c.plus_only,
+  const rows = await q<{ id: string; title: string; description: string | null; category: string | null; member_count: number; max_members: number; avatar_color: string; plus_only: boolean; joined: boolean }>(
+    `SELECT c.id, c.title, c.description, c.category, c.member_count, c.max_members, c.avatar_color, c.plus_only,
             EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.user_id = $1) AS joined
        FROM conversations c
       WHERE c.kind = 'group' AND c.is_public ${category ? 'AND c.category = $2' : ''}
@@ -216,6 +230,7 @@ export async function discoverGroups(userId: string, category?: string): Promise
     items: rows.map((r) => ({
       id: r.id, title: r.title, description: r.description ?? '', category: r.category ?? 'For you', memberCount: r.member_count,
       avatarColor: r.avatar_color, initials: initialsOf(r.title), plusOnly: r.plus_only, joined: r.joined,
+      maxMembers: r.max_members, full: r.member_count >= r.max_members,
     })),
     next: null,
   };
@@ -229,13 +244,24 @@ export async function joinGroup(userId: string, id: string): Promise<Conversatio
   if (c.plus_only) await requirePlus(userId, 'plus_group');
   const existing = await one('SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [id, userId]);
   if (!existing) {
-    if (c.member_count >= c.max_members) throw E.conflict('This group is full');
-    await tx(async (t) => {
-      const lastSeq = (await one<{ last_seq: number }>('SELECT last_seq FROM conversations WHERE id = $1 FOR UPDATE', [id], t))!.last_seq;
+    // Claim a seat atomically: the count only goes up while there's room, so two people joining at the same moment
+    // can never both take the last seat. Whoever loses gets GROUP_FULL (and the insert is rolled back).
+    const joined = await tx(async (t) => {
+      const seat = await one<{ last_seq: number }>(
+        'UPDATE conversations SET member_count = member_count + 1 WHERE id = $1 AND member_count < max_members RETURNING last_seq', [id], t,
+      );
+      if (!seat) return false;
       // New members start "caught up": history is readable, but it doesn't count as unread.
-      await q(`INSERT INTO conversation_members (conversation_id, user_id, read_seq, delivered_seq) VALUES ($1,$2,$3,$3) ON CONFLICT DO NOTHING`, [id, userId, lastSeq], t);
-      await q('UPDATE conversations SET member_count = member_count + 1 WHERE id = $1', [id], t);
+      const ins = await t.query(`INSERT INTO conversation_members (conversation_id, user_id, read_seq, delivered_seq) VALUES ($1,$2,$3,$3) ON CONFLICT DO NOTHING`, [id, userId, seat.last_seq]);
+      // Already a member (a double tap racing itself): give the seat back.
+      if ((ins.rowCount ?? 0) === 0) await t.query('UPDATE conversations SET member_count = member_count - 1 WHERE id = $1', [id]);
+      return true;
     });
+    if (!joined) {
+      await broadcastGroupCount(id);
+      throw new AppError(409, 'GROUP_FULL', 'This group just filled up. Try again later!');
+    }
+    await broadcastGroupCount(id);
     const u = await one<{ display_name: string }>('SELECT display_name FROM users WHERE id = $1', [userId]);
     const { sendSystem } = await import('./messages.js');
     await sendSystem(id, 'member_joined', `${u?.display_name ?? 'Someone'} joined`);
@@ -257,6 +283,7 @@ export async function leaveGroup(userId: string, id: string) {
     await q('UPDATE conversations SET member_count = GREATEST(member_count - 1, 0) WHERE id = $1', [id], t);
   });
   void m;
+  await broadcastGroupCount(id);
   const { sendSystem } = await import('./messages.js');
   await sendSystem(id, 'member_left', `${u?.display_name ?? 'Someone'} left`);
 }

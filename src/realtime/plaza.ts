@@ -12,6 +12,7 @@ import { log } from '../lib/log.js';
 import { isOnline } from '../lib/presence.js';
 import { redis } from '../lib/redis.js';
 import { rooms } from '../lib/emitter.js';
+import { takeSeat } from '../lib/seats.js';
 import {
   PLAZA_BALLS, ballStart, sanitizeBall,
   PLAZA_CAPACITY, PLAZA_EMOTES, PLAZA_HISTORY, PLAZA_HISTORY_TTL_S, PLAZA_LIMITS, PLAZA_SAY_MAX, PLAZA_SPOT_IDS,
@@ -79,6 +80,19 @@ async function blockedEitherWay(userId: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
+/**
+ * Tell everyone in the Plaza tab the new head counts. Joins and leaves often come in bursts, so they're batched
+ * (at most one recount every 400 ms per server).
+ */
+let countsTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleCounts(io: Server) {
+  if (countsTimer) return;
+  countsTimer = setTimeout(() => {
+    countsTimer = null;
+    plazaSpots().then((c) => { io.to(rooms.plazaLobby).emit('plaza:counts', c); }).catch(() => {});
+  }, 400);
+}
+
 const BLOCKS_TTL_MS = 30_000;
 /** The sender's blocks (either way), cached briefly so a block made mid-session applies within half a minute. */
 async function blocksOf(socket: PS): Promise<string[]> {
@@ -100,7 +114,8 @@ async function toSpot(io: Server, spot: PlazaSpotId, from: PS, event: string, pa
   io.to(roomOf(spot)).except(skip).emit(event, payload);
 }
 
-export function registerPlaza(io: Server, raw: Socket) {
+/** `ready` resolves once the socket is marked online (entering a spot needs that, or we'd look stale to ourselves). */
+export function registerPlaza(io: Server, raw: Socket, ready: Promise<void> = Promise.resolve()) {
   const socket = raw as PS;
   const userId = socket.data.userId;
   let sayTimes: number[] = [];
@@ -115,15 +130,30 @@ export function registerPlaza(io: Server, raw: Socket) {
       await redis.del(`plaza:at:${userId}`);
       await redis.hdel(spotKey(spot), userId);
       await toSpot(io, spot, socket, 'plaza:leave', { spot, userId });
+      scheduleCounts(io);
     }
   };
+
+  // The spot picker: live head counts while the Plaza tab is open.
+  socket.on('plaza:lobby', (p: unknown) => {
+    void (async () => {
+      const on = z.object({ on: z.boolean() }).parse(p).on;
+      if (on) {
+        await socket.join(rooms.plazaLobby);
+        socket.emit('plaza:counts', await plazaSpots());
+      } else {
+        await socket.leave(rooms.plazaLobby);
+      }
+    })().catch(() => {});
+  });
 
   socket.on('plaza:enter', (p: unknown, ack?: (r: PlazaEnterResult) => void) => {
     const reply = (r: PlazaEnterResult) => { if (typeof ack === 'function') ack(r); };
     void (async () => {
+      await ready;
       const { spot } = Spot.parse(p);
       if (socket.data.plazaSpot && socket.data.plazaSpot !== spot) await leave();
-      const here = await occupants(spot);
+      const here = await occupants(spot); // also clears out people whose connection died
       const already = here.some((o) => o.userId === userId);
       if (!already && here.length >= PLAZA_CAPACITY) return reply({ ok: false, code: 'FULL', message: 'This spot is full right now. Try another one!' });
 
@@ -133,14 +163,18 @@ export function registerPlaza(io: Server, raw: Socket) {
       );
       if (!u) return reply({ ok: false, code: 'ERROR', message: 'Could not join the Plaza' });
 
+      const pos = already ? here.find((o) => o.userId === userId)! : arrivalPoint(() => randomInt(1_000_000) / 1_000_000);
+      const me: PlazaOccupant = { userId, name: u.display_name, palette: u.palette, outfit: u.equipped_outfit, level: u.level, isPlus: u.plus, x: pos.x, y: pos.y };
+      // Atomic: if someone took the last spot a moment ago, we're told here instead of squeezing in as #31.
+      if (!(await takeSeat(spotKey(spot), userId, JSON.stringify(me), PLAZA_CAPACITY))) {
+        scheduleCounts(io);
+        return reply({ ok: false, code: 'FULL', message: 'Someone just took the last spot here. Try another one!' });
+      }
+      await redis.expire(spotKey(spot), TTL_S);
+
       // You're only ever in one spot: a different device or spot hands over to this socket.
       for (const s of PLAZA_SPOT_IDS) if (s !== spot) await redis.hdel(spotKey(s), userId);
       await redis.set(`plaza:at:${userId}`, socket.id, 'EX', TTL_S);
-
-      const pos = already ? here.find((o) => o.userId === userId)! : arrivalPoint(() => randomInt(1_000_000) / 1_000_000);
-      const me: PlazaOccupant = { userId, name: u.display_name, palette: u.palette, outfit: u.equipped_outfit, level: u.level, isPlus: u.plus, x: pos.x, y: pos.y };
-      await redis.hset(spotKey(spot), userId, JSON.stringify(me));
-      await redis.expire(spotKey(spot), TTL_S);
 
       socket.data.plazaBlocked = await blockedEitherWay(userId);
       socket.data.plazaBlockedAt = Date.now();
@@ -155,6 +189,7 @@ export function registerPlaza(io: Server, raw: Socket) {
       const state: PlazaState = { spot, occupants: [...here.filter((o) => o.userId !== userId && !blocked.has(o.userId)), me], lines, ball: await ballOf(spot) };
       reply({ ok: true, state });
       await toSpot(io, spot, socket, 'plaza:join', { spot, occupant: me });
+      scheduleCounts(io);
     })().catch((err) => {
       if (!(err instanceof z.ZodError)) log.error({ err }, 'plaza:enter failed');
       reply({ ok: false, code: 'ERROR', message: 'Could not join the Plaza' });
