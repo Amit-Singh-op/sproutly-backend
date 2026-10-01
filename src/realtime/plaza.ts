@@ -12,16 +12,32 @@ import { log } from '../lib/log.js';
 import { isOnline } from '../lib/presence.js';
 import { redis } from '../lib/redis.js';
 import {
+  PLAZA_BALLS, ballStart, sanitizeBall,
   PLAZA_CAPACITY, PLAZA_EMOTES, PLAZA_HISTORY, PLAZA_HISTORY_TTL_S, PLAZA_LIMITS, PLAZA_SAY_MAX, PLAZA_SPOT_IDS,
   arrivalPoint, clampToFloor,
 } from '../shared/plaza.js';
 import { cleanText } from '../shared/rules.js';
 import { recordSocialQuest } from '../core/companion.js';
-import type { PlazaEnterResult, PlazaLine, PlazaOccupant, PlazaSpotId, PlazaSpotInfo, PlazaState } from '../shared/types.js';
+import type { PlazaBall, PlazaEnterResult, PlazaLine, PlazaOccupant, PlazaSpotId, PlazaSpotInfo, PlazaState } from '../shared/types.js';
 
 const spotKey = (s: PlazaSpotId) => `plaza:${s}`;
 const linesKey = (s: PlazaSpotId) => `plaza:lines:${s}`;
 const roomOf = (s: PlazaSpotId) => `plaza-room:${s}`;
+const ballKey = (s: PlazaSpotId) => `plaza:ball:${s}`;
+const Kick = z.object({ x: z.number(), y: z.number(), z: z.number(), vx: z.number(), vy: z.number(), vz: z.number() });
+const KICK_MS = 120;
+
+/** The spot's ball: its last kick and when (the phones simulate from there). */
+async function ballOf(spot: PlazaSpotId): Promise<{ state: PlazaBall; ageMs: number } | null> {
+  if (!PLAZA_BALLS[spot]) return null;
+  const raw = await redis.get(ballKey(spot));
+  if (!raw) return { state: ballStart(), ageMs: 0 };
+  try {
+    const b = JSON.parse(raw) as PlazaBall & { at: number };
+    const { at, ...state } = b;
+    return { state, ageMs: Math.max(0, Date.now() - at) };
+  } catch { return { state: ballStart(), ageMs: 0 }; }
+}
 const TTL_S = 6 * 60 * 60;
 
 const Spot = z.object({ spot: z.enum(PLAZA_SPOT_IDS) });
@@ -29,8 +45,9 @@ const Move = z.object({ x: z.number(), y: z.number() });
 const Emote = z.object({ emote: z.enum(PLAZA_EMOTES as [string, ...string[]]) });
 const Say = z.object({ text: z.string().min(1).max(PLAZA_SAY_MAX * 2) });
 
-export interface PlazaSocketData { plazaSpot?: PlazaSpotId; plazaBlocked?: string[]; plazaMoveAt?: number; plazaEmoteAt?: number }
-type PS = Socket & { data: { userId: string } & PlazaSocketData };
+export interface PlazaSocketData { plazaSpot?: PlazaSpotId; plazaBlocked?: string[]; plazaMoveAt?: number; plazaEmoteAt?: number; plazaKickAt?: number }
+/** Socket.data is `any` in socket.io's types; give it ours. */
+type PS = Omit<Socket, 'data'> & { data: { userId: string } & PlazaSocketData };
 
 /** Everyone in the spot who's still really online (a crashed server never cleaned up; presence keys expire). */
 async function occupants(spot: PlazaSpotId): Promise<PlazaOccupant[]> {
@@ -124,7 +141,7 @@ export function registerPlaza(io: Server, raw: Socket) {
         .map((l) => { try { return JSON.parse(l) as PlazaLine; } catch { return null; } })
         .filter((l): l is PlazaLine => !!l && !blocked.has(l.userId))
         .reverse();
-      const state: PlazaState = { spot, occupants: [...here.filter((o) => o.userId !== userId && !blocked.has(o.userId)), me], lines };
+      const state: PlazaState = { spot, occupants: [...here.filter((o) => o.userId !== userId && !blocked.has(o.userId)), me], lines, ball: await ballOf(spot) };
       reply({ ok: true, state });
       await toSpot(io, spot, userId, 'plaza:join', { spot, occupant: me }, socket.id);
     })().catch((err) => {
@@ -162,6 +179,22 @@ export function registerPlaza(io: Server, raw: Socket) {
       await toSpot(io, spot, userId, 'plaza:emote', { spot, userId, emote });
       // Daily "wave at someone in the Plaza" quest: a wave counts when somebody else is here to see it.
       if (emote === 'wave' && (await redis.hlen(spotKey(spot))) > 1) await recordSocialQuest(userId, 'plaza');
+    })().catch(() => {});
+  });
+
+  /** Someone's companion kicked the ball: everyone else simulates from this exact state. */
+  socket.on('plaza:kick', (p: unknown) => {
+    void (async () => {
+      const spot = socket.data.plazaSpot;
+      if (!spot || !PLAZA_BALLS[spot]) return;
+      const now = Date.now();
+      if (now - (socket.data.plazaKickAt ?? 0) < KICK_MS) return;
+      socket.data.plazaKickAt = now;
+      const ball = sanitizeBall(Kick.parse(p));
+      await redis.set(ballKey(spot), JSON.stringify({ ...ball, at: now }), 'EX', TTL_S);
+      // The ball is shared, so everyone sees it move, even people who blocked the kicker.
+      const sockets = await io.in(roomOf(spot)).fetchSockets();
+      for (const s of sockets) if (s.id !== socket.id) s.emit('plaza:kick', { spot, userId, ball });
     })().catch(() => {});
   });
 

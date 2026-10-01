@@ -526,6 +526,7 @@ export interface ServiceEvents {
   'plaza:move': { spot: PlazaSpotId; userId: UUID; x: number; y: number };
   'plaza:emote': { spot: PlazaSpotId; userId: UUID; emote: PlazaEmote };
   'plaza:say': { spot: PlazaSpotId; line: PlazaLine };
+  'plaza:kick': { spot: PlazaSpotId; userId: UUID; ball: PlazaBall };
   'wallet:update': { coins: number };
   'room:state': RoomState;
   'stage:action': AvatarStageAction;
@@ -623,5 +624,7 @@ export interface PlazaOccupant {
 }
 export interface PlazaLine { id: string; userId: UUID; name: string; text: string; at: string }
 export interface PlazaSpotInfo { id: PlazaSpotId; count: number; full: boolean }
-export interface PlazaState { spot: PlazaSpotId; occupants: PlazaOccupant[]; lines: PlazaLine[] }
+/** The shared ball: x, y on the floor (0..1), z height (fraction of stage height), velocities per second. */
+export interface PlazaBall { x: number; y: number; z: number; vx: number; vy: number; vz: number }
+export interface PlazaState { spot: PlazaSpotId; occupants: PlazaOccupant[]; lines: PlazaLine[]; /** Spots with a ball: its last kick and how long ago that was. */ ball?: { state: PlazaBall; ageMs: number } | null }
 export type PlazaEnterResult = { ok: true; state: PlazaState } | { ok: false; code: 'FULL' | 'ERROR'; message: string };

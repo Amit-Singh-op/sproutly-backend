@@ -1,5 +1,5 @@
 // Mirror of sproutly/src/data/plaza.ts — the Plaza contract (public hangout spots). Keep in sync.
-import type { PlazaEmote, PlazaSpotId } from './types.js';
+import type { PlazaBall, PlazaEmote, PlazaSpotId } from './types.js';
 
 export const PLAZA_SPOTS: { id: PlazaSpotId; name: string; blurb: string; emoji: string }[] = [
   { id: 'cafe', name: 'Café', blurb: 'Warm drinks and easy chats', emoji: '☕' },
@@ -33,3 +33,66 @@ export function arrivalPoint(rand: () => number) {
 }
 /** Depth: companions further back (smaller y) are drawn smaller and behind. */
 export const depthScale = (y: number) => 0.62 + 0.38 * ((y - PLAZA_FLOOR.minY) / (PLAZA_FLOOR.maxY - PLAZA_FLOOR.minY));
+
+// ---------- shared ball (physics) ----------
+// Every phone runs the same simulation from the same kick, so all see the ball in the same place. Units: x and y
+// are fractions of the world floor (like positions), z is height above the ground as a fraction of stage height.
+export type BallKind = 'soccer' | 'beach';
+export const PLAZA_BALLS: Partial<Record<PlazaSpotId, BallKind>> = { park: 'soccer', rooftop: 'soccer', beach: 'beach', garden: 'beach' };
+export const BALL_PHYSICS: Record<BallKind, { bounce: number; groundFriction: number; airDrag: number; kick: number; lift: number; size: number }> = {
+  // heavy: rolls far, low bounce
+  soccer: { bounce: 0.5, groundFriction: 1.2, airDrag: 0.15, kick: 0.55, lift: 0.45, size: 22 },
+  // light: pops up, floats, stops sooner
+  beach: { bounce: 0.72, groundFriction: 2.6, airDrag: 2.2, kick: 0.45, lift: 0.8, size: 30 },
+};
+export const BALL_GRAVITY = 2.6;
+export const BALL_MAX_SPEED = 1.6;
+export const BALL_REST: Omit<PlazaBall, 'x' | 'y'> = { z: 0, vx: 0, vy: 0, vz: 0 };
+export const ballStart = (): PlazaBall => ({ x: 0.5, y: 0.64, ...BALL_REST });
+
+/** One physics step (dt seconds). Pure, and safe to run on the UI thread. */
+export function stepBall(b: PlazaBall, kind: BallKind, dt: number): PlazaBall {
+  'worklet';
+  const p = BALL_PHYSICS[kind];
+  let { x, y, z, vx, vy, vz } = b;
+  // gravity and bounce off the ground
+  vz -= BALL_GRAVITY * dt;
+  z += vz * dt;
+  if (z <= 0) {
+    z = 0;
+    vz = Math.abs(vz) > 0.08 ? -vz * p.bounce : 0;
+  }
+  // drag in the air, friction on the ground
+  const k = Math.exp(-(z > 0.001 ? p.airDrag : p.groundFriction) * dt);
+  vx *= k;
+  vy *= k;
+  x += vx * dt;
+  y += vy * dt;
+  // the floor's edges are walls
+  if (x < PLAZA_FLOOR.minX) { x = PLAZA_FLOOR.minX; vx = Math.abs(vx) * p.bounce; }
+  if (x > PLAZA_FLOOR.maxX) { x = PLAZA_FLOOR.maxX; vx = -Math.abs(vx) * p.bounce; }
+  if (y < PLAZA_FLOOR.minY) { y = PLAZA_FLOOR.minY; vy = Math.abs(vy) * p.bounce; }
+  if (y > PLAZA_FLOOR.maxY) { y = PLAZA_FLOOR.maxY; vy = -Math.abs(vy) * p.bounce; }
+  if (z === 0 && vz === 0 && Math.hypot(vx, vy) < 0.004) { vx = 0; vy = 0; }
+  return { x, y, z, vx, vy, vz };
+}
+export const ballMoving = (b: PlazaBall) => b.z > 0 || b.vz !== 0 || b.vx !== 0 || b.vy !== 0;
+
+/** Where a ball kicked `ageMs` ago is now (same fixed steps as the live simulation). */
+export function ballAfter(b: PlazaBall, kind: BallKind, ageMs: number): PlazaBall {
+  let s = b;
+  const steps = Math.min(Math.max(0, Math.round(ageMs / (1000 / 60))), 60 * 20);
+  for (let i = 0; i < steps && ballMoving(s); i++) s = stepBall(s, kind, 1 / 60);
+  return s;
+}
+
+/** Keep a kick physically sane (a modified client can't fire the ball across the world). */
+export function sanitizeBall(b: PlazaBall): PlazaBall {
+  const fin = (v: number) => (Number.isFinite(v) ? v : 0);
+  const pos = clampToFloor(fin(b.x), fin(b.y));
+  let vx = fin(b.vx);
+  let vy = fin(b.vy);
+  const sp = Math.hypot(vx, vy);
+  if (sp > BALL_MAX_SPEED) { vx = (vx / sp) * BALL_MAX_SPEED; vy = (vy / sp) * BALL_MAX_SPEED; }
+  return { x: pos.x, y: pos.y, z: Math.min(0.5, Math.max(0, fin(b.z))), vx, vy, vz: Math.min(1.5, Math.max(-1.5, fin(b.vz))) };
+}

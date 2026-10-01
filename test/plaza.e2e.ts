@@ -4,6 +4,7 @@
  */
 import pg from 'pg';
 import { io, type Socket } from 'socket.io-client';
+import { ballAfter, ballMoving } from '../src/shared/plaza.js';
 
 const API = process.env.E2E_API ?? 'http://localhost:4100/v1';
 const RT = process.env.E2E_RT ?? 'http://localhost:4101';
@@ -28,7 +29,7 @@ async function user(tag: string) {
   const sock: Socket = io(RT, { transports: ['websocket'], auth: { token: v.body.accessToken } });
   await new Promise<void>((res, rej) => { sock.on('connect', () => res()); sock.on('connect_error', rej); });
   const seen: { event: string; p: any }[] = [];
-  for (const e of ['plaza:join', 'plaza:leave', 'plaza:move', 'plaza:emote', 'plaza:say']) sock.on(e, (p: any) => seen.push({ event: e, p }));
+  for (const e of ['plaza:join', 'plaza:leave', 'plaza:move', 'plaza:emote', 'plaza:say', 'plaza:kick']) sock.on(e, (p: any) => seen.push({ event: e, p }));
   return { token: v.body.accessToken as string, id: me.body.id as string, sock, seen };
 }
 const enter = (u: { sock: Socket }, spot: string) => new Promise<any>((res) => u.sock.timeout(8000).emit('plaza:enter', { spot }, (err: any, r: any) => res(err ? { ok: false, err: String(err) } : r)));
@@ -83,6 +84,18 @@ async function main() {
   check('chat is rate limited', burst.some((r) => !r.ok), burst);
   const ec = await enter(C, 'park');
   check('arrivals see recent lines', ec.ok && ec.state.lines.some((l: any) => l.text === 'hello park'), ec.state?.lines);
+
+  console.log('\nBall');
+  check('the park has a ball, resting once caught up', !!ea.state.ball && !ballMoving(ballAfter(ea.state.ball.state, 'soccer', ea.state.ball.ageMs + 20_000)), ea.state.ball);
+  check('the library has none', (await enter(C, 'library')).state.ball === null);
+  await enter(C, 'park');
+  A.sock.emit('plaza:kick', { x: 0.5, y: 0.64, z: 0, vx: 50, vy: 0, vz: 0.5 });
+  await sleep(400);
+  const kick = B.seen.find((s) => s.event === 'plaza:kick');
+  check('kicks reach others, speed capped', !!kick && kick.p.userId === A.id && kick.p.ball.vx <= 1.6 + 1e-9, kick?.p);
+  check('the kicker gets no echo', !A.seen.some((s) => s.event === 'plaza:kick'));
+  const late = await enter(C, 'park');
+  check('arrivals get the last kick and its age', late.state.ball.state.vx > 0 && late.state.ball.ageMs >= 300, late.state.ball);
 
   console.log('\nBlocking');
   await call('POST', `/users/${A.id}/block`, B.token);
