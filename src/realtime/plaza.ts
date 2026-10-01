@@ -11,6 +11,7 @@ import { one, q } from '../db/pool.js';
 import { log } from '../lib/log.js';
 import { isOnline } from '../lib/presence.js';
 import { redis } from '../lib/redis.js';
+import { rooms } from '../lib/emitter.js';
 import {
   PLAZA_BALLS, ballStart, sanitizeBall,
   PLAZA_CAPACITY, PLAZA_EMOTES, PLAZA_HISTORY, PLAZA_HISTORY_TTL_S, PLAZA_LIMITS, PLAZA_SAY_MAX, PLAZA_SPOT_IDS,
@@ -18,7 +19,7 @@ import {
 } from '../shared/plaza.js';
 import { cleanText } from '../shared/rules.js';
 import { recordSocialQuest } from '../core/companion.js';
-import type { PlazaBall, PlazaEnterResult, PlazaLine, PlazaOccupant, PlazaSpotId, PlazaSpotInfo, PlazaState } from '../shared/types.js';
+import type { PlazaBall, PlazaEnterResult, PlazaSayResult, PlazaLine, PlazaOccupant, PlazaSpotId, PlazaSpotInfo, PlazaState } from '../shared/types.js';
 
 const spotKey = (s: PlazaSpotId) => `plaza:${s}`;
 const linesKey = (s: PlazaSpotId) => `plaza:lines:${s}`;
@@ -45,7 +46,7 @@ const Move = z.object({ x: z.number(), y: z.number() });
 const Emote = z.object({ emote: z.enum(PLAZA_EMOTES as [string, ...string[]]) });
 const Say = z.object({ text: z.string().min(1).max(PLAZA_SAY_MAX * 2) });
 
-export interface PlazaSocketData { plazaSpot?: PlazaSpotId; plazaBlocked?: string[]; plazaMoveAt?: number; plazaEmoteAt?: number; plazaKickAt?: number }
+export interface PlazaSocketData { plazaSpot?: PlazaSpotId; plazaBlocked?: string[]; plazaBlockedAt?: number; plazaMoveAt?: number; plazaEmoteAt?: number; plazaKickAt?: number }
 /** Socket.data is `any` in socket.io's types; give it ours. */
 type PS = Omit<Socket, 'data'> & { data: { userId: string } & PlazaSocketData };
 
@@ -78,16 +79,25 @@ async function blockedEitherWay(userId: string): Promise<string[]> {
   return rows.map((r) => r.id);
 }
 
-/** Send to everyone in the spot except people with a block either way with `actorId`. */
-async function toSpot(io: Server, spot: PlazaSpotId, actorId: string, event: string, payload: unknown, exceptSocket?: string) {
-  const sockets = await io.in(roomOf(spot)).fetchSockets();
-  for (const s of sockets) {
-    if (s.id === exceptSocket) continue;
-    const d = s.data as { userId: string } & PlazaSocketData;
-    if (d.userId === actorId && event !== 'plaza:say') continue;
-    if (d.plazaBlocked?.includes(actorId)) continue;
-    s.emit(event, payload);
+const BLOCKS_TTL_MS = 30_000;
+/** The sender's blocks (either way), cached briefly so a block made mid-session applies within half a minute. */
+async function blocksOf(socket: PS): Promise<string[]> {
+  const d = socket.data;
+  if (!d.plazaBlocked || Date.now() - (d.plazaBlockedAt ?? 0) > BLOCKS_TTL_MS) {
+    d.plazaBlocked = await blockedEitherWay(d.userId);
+    d.plazaBlockedAt = Date.now();
   }
+  return d.plazaBlocked;
+}
+
+/**
+ * Send to everyone in the spot except the sender and anyone with a block either way. A plain room broadcast with
+ * except(): it goes out over the Redis adapter's pub/sub like every other realtime event and never waits on other
+ * server instances (fetchSockets did, and stalled for seconds on some hosted Redis setups).
+ */
+async function toSpot(io: Server, spot: PlazaSpotId, from: PS, event: string, payload: unknown) {
+  const skip = [rooms.user(from.data.userId), ...(await blocksOf(from)).map(rooms.user)];
+  io.to(roomOf(spot)).except(skip).emit(event, payload);
 }
 
 export function registerPlaza(io: Server, raw: Socket) {
@@ -104,7 +114,7 @@ export function registerPlaza(io: Server, raw: Socket) {
     if ((await redis.get(`plaza:at:${userId}`)) === socket.id) {
       await redis.del(`plaza:at:${userId}`);
       await redis.hdel(spotKey(spot), userId);
-      await toSpot(io, spot, userId, 'plaza:leave', { spot, userId });
+      await toSpot(io, spot, socket, 'plaza:leave', { spot, userId });
     }
   };
 
@@ -133,6 +143,7 @@ export function registerPlaza(io: Server, raw: Socket) {
       await redis.expire(spotKey(spot), TTL_S);
 
       socket.data.plazaBlocked = await blockedEitherWay(userId);
+      socket.data.plazaBlockedAt = Date.now();
       socket.data.plazaSpot = spot;
       await socket.join(roomOf(spot));
 
@@ -143,7 +154,7 @@ export function registerPlaza(io: Server, raw: Socket) {
         .reverse();
       const state: PlazaState = { spot, occupants: [...here.filter((o) => o.userId !== userId && !blocked.has(o.userId)), me], lines, ball: await ballOf(spot) };
       reply({ ok: true, state });
-      await toSpot(io, spot, userId, 'plaza:join', { spot, occupant: me }, socket.id);
+      await toSpot(io, spot, socket, 'plaza:join', { spot, occupant: me });
     })().catch((err) => {
       if (!(err instanceof z.ZodError)) log.error({ err }, 'plaza:enter failed');
       reply({ ok: false, code: 'ERROR', message: 'Could not join the Plaza' });
@@ -164,7 +175,7 @@ export function registerPlaza(io: Server, raw: Socket) {
       const prev = await redis.hget(spotKey(spot), userId);
       if (!prev) return;
       await redis.hset(spotKey(spot), userId, JSON.stringify({ ...(JSON.parse(prev) as PlazaOccupant), x, y }));
-      await toSpot(io, spot, userId, 'plaza:move', { spot, userId, x, y });
+      await toSpot(io, spot, socket, 'plaza:move', { spot, userId, x, y });
     })().catch(() => {});
   });
 
@@ -176,7 +187,7 @@ export function registerPlaza(io: Server, raw: Socket) {
       if (now - (socket.data.plazaEmoteAt ?? 0) < PLAZA_LIMITS.emoteMs) return;
       socket.data.plazaEmoteAt = now;
       const { emote } = Emote.parse(p);
-      await toSpot(io, spot, userId, 'plaza:emote', { spot, userId, emote });
+      await toSpot(io, spot, socket, 'plaza:emote', { spot, userId, emote });
       // Daily "wave at someone in the Plaza" quest: a wave counts when somebody else is here to see it.
       if (emote === 'wave' && (await redis.hlen(spotKey(spot))) > 1) await recordSocialQuest(userId, 'plaza');
     })().catch(() => {});
@@ -193,13 +204,12 @@ export function registerPlaza(io: Server, raw: Socket) {
       const ball = sanitizeBall(Kick.parse(p));
       await redis.set(ballKey(spot), JSON.stringify({ ...ball, at: now }), 'EX', TTL_S);
       // The ball is shared, so everyone sees it move, even people who blocked the kicker.
-      const sockets = await io.in(roomOf(spot)).fetchSockets();
-      for (const s of sockets) if (s.id !== socket.id) s.emit('plaza:kick', { spot, userId, ball });
+      io.to(roomOf(spot)).except(socket.id).emit('plaza:kick', { spot, userId, ball });
     })().catch(() => {});
   });
 
-  socket.on('plaza:say', (p: unknown, ack?: (r: { ok: boolean; message?: string }) => void) => {
-    const reply = (r: { ok: boolean; message?: string }) => { if (typeof ack === 'function') ack(r); };
+  socket.on('plaza:say', (p: unknown, ack?: (r: PlazaSayResult) => void) => {
+    const reply = (r: PlazaSayResult) => { if (typeof ack === 'function') ack(r); };
     void (async () => {
       const spot = socket.data.plazaSpot;
       if (!spot) return reply({ ok: false, message: 'Join a spot first' });
@@ -214,8 +224,9 @@ export function registerPlaza(io: Server, raw: Socket) {
       await redis.lpush(linesKey(spot), JSON.stringify(line));
       await redis.ltrim(linesKey(spot), 0, PLAZA_HISTORY - 1);
       await redis.expire(linesKey(spot), PLAZA_HISTORY_TTL_S);
-      await toSpot(io, spot, userId, 'plaza:say', { spot, line });
-      reply({ ok: true });
+      // Answer the sender first (with the line, so it shows on their screen right away), then tell everyone else.
+      reply({ ok: true, line });
+      await toSpot(io, spot, socket, 'plaza:say', { spot, line });
     })().catch(() => reply({ ok: false, message: 'Could not send' }));
   });
 

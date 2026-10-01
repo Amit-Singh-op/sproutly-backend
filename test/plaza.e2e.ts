@@ -75,7 +75,7 @@ async function main() {
   const s1 = await say(B, '  hello\u0007 park  ');
   await sleep(300);
   check('chat line reaches others, cleaned', s1.ok && got(A, 'plaza:say', (p) => p.line.userId === B.id && p.line.text === 'hello park'), A.seen.filter((s) => s.event === 'plaza:say'));
-  check('sender gets their own line back', got(B, 'plaza:say', (p) => p.line.text === 'hello park'));
+  check('sender gets their line in the reply, not as an echo', s1.line?.text === 'hello park' && !got(B, 'plaza:say', (p) => p.line.text === 'hello park'));
   const long = await say(B, 'x'.repeat(150));
   await sleep(200);
   check('long lines are cut to 80', long.ok && got(A, 'plaza:say', (p) => p.line.text.length === 80));

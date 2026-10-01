@@ -627,4 +627,6 @@ export interface PlazaSpotInfo { id: PlazaSpotId; count: number; full: boolean }
 /** The shared ball: x, y on the floor (0..1), z height (fraction of stage height), velocities per second. */
 export interface PlazaBall { x: number; y: number; z: number; vx: number; vy: number; vz: number }
 export interface PlazaState { spot: PlazaSpotId; occupants: PlazaOccupant[]; lines: PlazaLine[]; /** Spots with a ball: its last kick and how long ago that was. */ ball?: { state: PlazaBall; ageMs: number } | null }
+/** Your own line comes back in the reply, so it shows right away (others get it as 'plaza:say'). */
+export interface PlazaSayResult { ok: boolean; message?: string; line?: PlazaLine }
 export type PlazaEnterResult = { ok: true; state: PlazaState } | { ok: false; code: 'FULL' | 'ERROR'; message: string };
