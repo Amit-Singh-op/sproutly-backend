@@ -521,6 +521,11 @@ export interface ServiceEvents {
   'me:entitlements': Entitlements;
   'quest:update': { quests: Quest[]; energy: number; level: number };
   'activity:new': ActivityItem;
+  'plaza:join': { spot: PlazaSpotId; occupant: PlazaOccupant };
+  'plaza:leave': { spot: PlazaSpotId; userId: UUID };
+  'plaza:move': { spot: PlazaSpotId; userId: UUID; x: number; y: number };
+  'plaza:emote': { spot: PlazaSpotId; userId: UUID; emote: PlazaEmote };
+  'plaza:say': { spot: PlazaSpotId; line: PlazaLine };
   'wallet:update': { coins: number };
   'room:state': RoomState;
   'stage:action': AvatarStageAction;
@@ -601,3 +606,22 @@ export interface WeeklyRecap {
   chatStreakBest: number;
   streak: number;
 }
+
+// ---------- plaza (public hangout spots; rules in plaza.ts) ----------
+export type PlazaSpotId = 'cafe' | 'park' | 'beach' | 'rooftop' | 'library' | 'garden';
+export type PlazaEmote = 'wave' | 'heart' | 'laugh' | 'dance' | 'cheer';
+export interface PlazaOccupant {
+  userId: UUID;
+  name: string;
+  palette: PaletteId;
+  outfit: Outfit;
+  level: number;
+  isPlus: boolean;
+  /** 0..1 of the stage. */
+  x: number;
+  y: number;
+}
+export interface PlazaLine { id: string; userId: UUID; name: string; text: string; at: string }
+export interface PlazaSpotInfo { id: PlazaSpotId; count: number; full: boolean }
+export interface PlazaState { spot: PlazaSpotId; occupants: PlazaOccupant[]; lines: PlazaLine[] }
+export type PlazaEnterResult = { ok: true; state: PlazaState } | { ok: false; code: 'FULL' | 'ERROR'; message: string };

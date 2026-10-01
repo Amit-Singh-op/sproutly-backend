@@ -10,6 +10,7 @@ import { addComment, cheer, createPost, deleteComment, deletePost, feed, getPost
 import { NewStoryBody, createStory, deleteStory, listStories, viewStory } from '../../core/stories.js';
 import { addFriend, blockUser, friends, removeFriend, search } from '../../core/users.js';
 import { listActivity, markActivitySeen } from '../../core/activity.js';
+import { plazaSpots } from '../../realtime/plaza.js';
 
 const Id = z.object({ id: z.string().uuid() });
 const UserId = z.object({ userId: z.string().uuid() });
@@ -74,6 +75,9 @@ export async function socialRoutes(app: FastifyInstance) {
   });
   app.post('/rooms/:userId/guestbook', async (req) => signGuestbook(req.userId, UserId.parse(req.params).userId,
     z.object({ sticker: z.enum(GUESTBOOK_STICKERS), note: z.string().max(LIMITS.guestbookNoteMax * 2).optional() }).parse(req.body)));
+
+  // Plaza: live head counts per spot (joining happens over the socket).
+  app.get('/plaza/spots', async () => plazaSpots());
 
   // Friend activity feed
   app.get('/activity', async (req) => listActivity(req.userId));

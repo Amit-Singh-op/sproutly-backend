@@ -94,7 +94,7 @@ export async function grantEnergy(c: pg.PoolClient, userId: string, gain: number
  * Progress a social quest outside any other transaction and tell the app. uniqueKey counts each friend once.
  * Best effort: a quest hiccup never fails the cheer / sticker / guestbook note that triggered it.
  */
-export async function recordSocialQuest(userId: string, key: SocialQuestKey, uniqueKey?: string) {
+export async function recordSocialQuest(userId: string, key: SocialQuestKey | 'sticker', uniqueKey?: string) {
   try {
     const plus = await isPlus(userId);
     const out = await tx(async (c) => {

@@ -21,6 +21,7 @@ export async function handleQuest(job: QuestJob) {
     // "Say hi to 3 friends": every other member of the chat is a recipient.
     const recipients = await q<{ user_id: string }>('SELECT user_id FROM conversation_members WHERE conversation_id = $1 AND user_id <> $2', [m.conversation_id, m.sender_id]);
     await recordMessageSent(m.sender_id, recipients.map((r) => r.user_id));
+    // Older days' 'sticker' quest rows (before it became the Plaza wave) can still complete.
     if (m.type === 'sticker' && recipients.length > 0) await recordSocialQuest(m.sender_id, 'sticker');
     // Chat streaks are a DM thing; counted on the day the message was sent (a retried job doesn't shift it).
     if (m.kind === 'dm' && recipients[0]) await recordDmMessage(m.sender_id, recipients[0].user_id, m.created_at);

@@ -98,7 +98,7 @@ export function rollEggReward(rand: () => number, owned: ReadonlySet<string>): {
 // ---------- social quests (one rotates in each day next to pet / feed / say hi) ----------
 export const SOCIAL_QUESTS = [
   { key: 'visit2', title: "Cheer 2 friends' rooms", target: 2, reward: 20 },
-  { key: 'sticker', title: 'Send a friend a sticker', target: 1, reward: 10 },
+  { key: 'plaza', title: 'Wave at someone in the Plaza', target: 1, reward: 10 },
   { key: 'guestbook', title: "Sign a friend's guestbook", target: 1, reward: 15 },
 ] as const;
 export type SocialQuestKey = (typeof SOCIAL_QUESTS)[number]['key'];

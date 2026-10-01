@@ -16,6 +16,7 @@ import { log } from '../lib/log.js';
 import { ONLINE_SET, dropPresence, isOnline, touchPresence, viewingKey } from '../lib/presence.js';
 import { redis } from '../lib/redis.js';
 import { LIMITS } from '../shared/rules.js';
+import { registerPlaza } from './plaza.js';
 import { STAGE_CAPACITY, type RoomState, type SendAck, type StageOccupant } from '../shared/types.js';
 
 const HEARTBEAT_MS = 25_000;
@@ -157,6 +158,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
     await touchPresence(userId, socket.id);
     if (!wasOnline) await broadcastPresence(userId, true);
     const beat = setInterval(() => { void touchPresence(userId, socket.id); }, HEARTBEAT_MS);
+    registerPlaza(io, socket);
 
     // ---- messages ----
     socket.on('msg:send', async (input: unknown, ack?: (a: SendAck) => void) => {

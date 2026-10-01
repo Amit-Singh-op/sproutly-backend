@@ -57,7 +57,7 @@ async function main() {
   const me = (await call('GET', '/me', A.token)).body;
   check('starts with one banked shield', me.companion.shields === 1, me.companion);
   check('no last action yet', me.companion.lastActionAt === null);
-  check('four quests today, one of them social', me.quests.length === 4 && me.quests.some((q: any) => ['visit2', 'sticker', 'guestbook'].includes(q.key)), me.quests.map((q: any) => q.key));
+  check('four quests today, one of them social', me.quests.length === 4 && me.quests.some((q: any) => ['visit2', 'plaza', 'guestbook'].includes(q.key)), me.quests.map((q: any) => q.key));
   const egg0 = (await call('GET', '/egg', A.token)).body.egg;
   check('starter egg waiting, not warmed', egg0 && egg0.progress === 0 && egg0.target === EGG_DAYS && !egg0.ready && egg0.source === 'starter', egg0);
   const eggAgain = (await call('GET', '/egg', A.token)).body.egg;
@@ -197,10 +197,10 @@ async function main() {
   check('B sees the guestbook note in the feed', feed2.body.items.some((i: any) => i.kind === 'guestbook' && i.actor.id === A.id));
   // The social quest: whichever one rotates in today should have moved for A if it was cheer or guestbook.
   const qA = (await call('GET', '/quests/today', A.token)).body;
-  const social = qA.find((q: any) => ['visit2', 'sticker', 'guestbook'].includes(q.key));
+  const social = qA.find((q: any) => ['visit2', 'plaza', 'guestbook'].includes(q.key));
   if (social.key === 'visit2') check('visit2 counts the cheer (1/2)', social.progress === 1, social);
   if (social.key === 'guestbook') check('guestbook quest done', social.done === true, social);
-  if (social.key === 'sticker') check('sticker quest untouched so far', social.progress === 0, social);
+  if (social.key === 'plaza') check('plaza quest untouched so far', social.progress === 0, social);
 
   console.log('\nFriend (chat) streak');
   const dm = (await call('POST', '/conversations', A.token, { kind: 'dm', userId: B.id })).body;
@@ -225,10 +225,7 @@ async function main() {
   check('…and B\'s', bFeed.body.items.some((i: any) => i.kind === 'friend_streak' && i.actor.id === A.id));
   // Sticker quest
   await call('POST', `/conversations/${dm.id}/messages`, A.token, { clientId: crypto.randomUUID(), type: 'sticker', payload: { kind: 'happy' } });
-  if (social.key === 'sticker') {
-    const q2 = await until(() => call('GET', '/quests/today', A.token), (r) => r.body.find((q: any) => q.key === 'sticker')?.done);
-    check('sticker quest completes from a sticker message', q2.body.find((q: any) => q.key === 'sticker')?.done === true);
-  }
+
 
   console.log('\nLevel-up reaches friends');
   await sql('UPDATE companions SET energy = 995 WHERE user_id = $1', [A.id]);
