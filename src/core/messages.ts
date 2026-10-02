@@ -12,6 +12,7 @@ import { LIMITS, RATE_LIMITS, cleanText, emotesFor, neutralPreview, previewFor }
 import { EMOTES, STICKER_KINDS, type Message, type PollPayload, type SystemPayload } from '../shared/types.js';
 import { isPlus } from './entitlements.js';
 import { memberIds, requireMember, summaryFor } from './conversations.js';
+import { requireLiveSeat } from './live.js';
 
 // ---------------- validation (doc 6.2 step 2) ----------------
 const Text = z.string().transform(cleanText).pipe(z.string().min(1, 'Message is empty').max(LIMITS.textMax, 'Message is too long'));
@@ -122,6 +123,8 @@ async function fanOut(msg: Message, kind: 'dm' | 'group', senderName: string) {
 export async function sendMessage(userId: string, input: SendBody): Promise<Message> {
   const member = await requireMember(userId, input.conversationId);
   if (member.read_only) throw E.readOnly();
+  // Groups allow ROOM_LIVE_CAPACITY people in at once: sending needs one of those seats.
+  await requireLiveSeat(userId, input.conversationId);
 
   // Step 3: idempotency fast-path. The conversation kind and sender name are needed later; fetching them in the same
   // round trip matters when the database is far away (each sequential query delays msg:new for every member).

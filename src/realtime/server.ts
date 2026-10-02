@@ -4,7 +4,8 @@ import { Redis } from 'ioredis';
 import { Server, type Socket } from 'socket.io';
 import { z } from 'zod';
 import { config } from '../config.js';
-import { memberIds, requireMember, summaryFor } from '../core/conversations.js';
+import { broadcastGroupCount, memberIds, requireMember, summaryFor } from '../core/conversations.js';
+import { leaveLiveSeat, takeLiveSeat } from '../core/live.js';
 import { SendBody, markWatermark, sendMessage } from '../core/messages.js';
 import { presenceAudience } from '../core/users.js';
 import { isApproved } from '../core/approval.js';
@@ -186,10 +187,17 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
       await ready;
       const { conversationId } = ConvRef.parse(p);
       await requireMember(userId, conversationId);
+      // Groups hold ROOM_LIVE_CAPACITY people at once. Full: say so (the app shows it and asks again when a seat frees).
+      const seat = await takeLiveSeat(userId, conversationId, socket.id);
+      if (!seat.ok) {
+        socket.emit('conv:full', { conversationId, capacity: seat.capacity ?? 0, count: seat.count });
+        return;
+      }
       await socket.join(rooms.conv(conversationId));
       socket.data.convs.add(conversationId);
       await redis.hset(viewingKey(conversationId), userId, socket.id);
       await enterStage(conversationId);
+      if (seat.capacity !== null) void broadcastGroupCount(conversationId);
     }));
     // Waiting outside a full room: the app asks again when it sees a spot open.
     socket.on('stage:enter', (p: unknown) => wrap(async () => {
@@ -202,6 +210,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
       const { conversationId } = ConvRef.parse(p);
       await socket.leave(rooms.conv(conversationId));
       socket.data.convs.delete(conversationId);
+      if (await leaveLiveSeat(userId, conversationId, socket.id)) void broadcastGroupCount(conversationId);
       await leaveStage(conversationId);
       await redis.hdel(viewingKey(conversationId), userId);
       await setTyping(userId, conversationId, false);
@@ -337,6 +346,7 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
       clearInterval(beat);
       await dropPresence(userId, socket.id);
       for (const c of socket.data.convs) {
+        if (await leaveLiveSeat(userId, c, socket.id).catch(() => false)) void broadcastGroupCount(c);
         await leaveStage(c).catch(() => {});
         if ((await redis.hget(viewingKey(c), userId)) === socket.id) await redis.hdel(viewingKey(c), userId);
         await setTyping(userId, c, false).catch(() => {});

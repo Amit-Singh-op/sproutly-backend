@@ -190,11 +190,12 @@ export interface ConversationSummary {
   pinned: boolean;
   /** DMs: the chat streak with the other person (null when there is none). */
   friendStreak?: FriendStreak | null;
-  /** Groups: how many it holds (memberCount is live via 'group:count'). */
-  maxMembers?: number;
+  /** Groups: people in the chat right now, out of `capacity` at once (live via 'group:count'). */
+  liveCount?: number;
+  capacity?: number;
 }
-/** A public group found by search, with its live head count. */
-export interface GroupHit { id: UUID; title: string; memberCount: number; maxMembers?: number; full?: boolean; plusOnly?: boolean; joined?: boolean }
+/** A public group found by search, with its live numbers. */
+export interface GroupHit { id: UUID; title: string; memberCount: number; liveCount?: number; capacity?: number; full?: boolean; plusOnly?: boolean; joined?: boolean }
 
 export interface MemberReceipt {
   userId: UUID;
@@ -315,12 +316,13 @@ export interface GroupCard {
   initials: string;
   plusOnly: boolean;
   joined: boolean;
-  /** How many people the group holds; `full` = no room left right now (live via 'group:count'). */
-  maxMembers?: number;
+  /** People in the chat right now, out of `capacity` at once; `full` = no room right now (live via 'group:count'). */
+  liveCount?: number;
+  capacity?: number;
   full?: boolean;
 }
-/** A public group's live head count (sent to people looking at the group list, and to its members). */
-export interface GroupCount { id: UUID; memberCount: number; maxMembers: number; full: boolean }
+/** A group's live numbers: members (no limit) and how many are in the chat right now (sent to viewers and members). */
+export interface GroupCount { id: UUID; memberCount: number; liveCount: number; capacity: number; full: boolean }
 
 export interface EventCard {
   id: UUID;
@@ -476,6 +478,8 @@ export interface StageOccupant {
 export interface StagePresence { conversationId: UUID; occupants: StageOccupant[] }
 /** Most companions one chat's room holds at once. */
 export const STAGE_CAPACITY = 25;
+/** Most people in a group chat at the same moment (members are unlimited). Same as the avatar room's seats. */
+export const ROOM_LIVE_CAPACITY = STAGE_CAPACITY;
 /** Sent to you when the room is full: you can still chat, your companion waits outside until a spot opens. */
 export interface StageFull { conversationId: UUID; capacity: number; count: number }
 
@@ -538,6 +542,8 @@ export interface ServiceEvents {
   'plaza:kick': { spot: PlazaSpotId; userId: UUID; ball: PlazaBall };
   'plaza:counts': PlazaSpotInfo[];
   'group:count': GroupCount;
+  /** You opened a group chat that's at its at-once limit: you can read it and you're let in when a seat frees up. */
+  'conv:full': { conversationId: UUID; capacity: number; count: number };
   'wallet:update': { coins: number };
   'room:state': RoomState;
   'stage:action': AvatarStageAction;

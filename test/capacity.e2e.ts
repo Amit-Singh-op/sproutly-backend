@@ -1,13 +1,13 @@
 /**
  * Capacity under simultaneous joins, against a LOCAL backend (api :4100, realtime :4101):
  *   DATABASE_URL=postgres://...localhost... E2E_API=http://localhost:4100/v1 E2E_RT=http://localhost:4101 npx tsx test/capacity.e2e.ts
- * Everyone fires at the same moment; exactly the capacity gets in, the rest are told it's full, and watchers get live counts.
+ * Everyone fires at the same moment; exactly the capacity gets in (groups: members unlimited, 25 in the chat at once), the rest are told it's full, and watchers get live counts.
  */
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
 import { io, type Socket } from 'socket.io-client';
 import { PLAZA_CAPACITY } from '../src/shared/plaza.js';
-import { STAGE_CAPACITY } from '../src/shared/types.js';
+import { ROOM_LIVE_CAPACITY, STAGE_CAPACITY } from '../src/shared/types.js';
 
 const API = process.env.E2E_API ?? 'http://localhost:4100/v1';
 const RT = process.env.E2E_RT ?? 'http://localhost:4101';
@@ -34,55 +34,64 @@ async function user(tag: string): Promise<U> {
   const sock = io(RT, { transports: ['websocket'], auth: { token: v.body.accessToken } });
   await new Promise<void>((res, rej) => { sock.on('connect', () => res()); sock.on('connect_error', rej); });
   const seen: { e: string; p: any }[] = [];
-  for (const e of ['group:count', 'plaza:counts', 'stage:full', 'stage:presence']) sock.on(e, (p: any) => seen.push({ e, p }));
+  for (const e of ['group:count', 'plaza:counts', 'stage:full', 'stage:presence', 'conv:full']) sock.on(e, (p: any) => seen.push({ e, p }));
   return { token: v.body.accessToken, id: me.body.id, sock, seen };
 }
 const ack = (s: Socket, ev: string, p: unknown) => new Promise<any>((res) => s.timeout(10000).emit(ev, p, (e: any, r: any) => res(e ? { ok: false, err: String(e) } : r)));
 
 async function main() {
-  console.log('\nGroup: 3 seats, 8 people join at the same moment');
+  const N = ROOM_LIVE_CAPACITY + 2;
+  console.log(`\nGroup: no member limit, ${ROOM_LIVE_CAPACITY} in the chat at once; ${N} members open it at the same moment`);
   const owner = await user('owner');
   const watcher = await user('watcher');
   const g = (await call('POST', '/conversations', owner.token, { kind: 'group', title: `Cap ${Date.now()}`, category: 'Gaming', isPublic: true, avatarColor: '#2F8A6C', memberIds: [] })).body;
-  await db.query('UPDATE conversations SET max_members = 3 WHERE id = $1', [g.id]); // owner holds seat 1
   watcher.sock.emit('discover:watch', { on: true });
   await sleep(300);
-  const joiners = await Promise.all(Array.from({ length: 8 }, (_, i) => user(`g${i}`)));
-  const results = await Promise.all(joiners.map((u) => call('POST', `/groups/${g.id}/join`, u.token)));
-  const ok = results.filter((r) => r.status === 200).length;
-  const fullMsgs = results.filter((r) => r.status === 409 && r.body.code === 'GROUP_FULL');
-  check(`exactly 2 got the 2 free seats (got ${ok})`, ok === 2, results.map((r) => r.status));
-  check('everyone else was told it just filled up', fullMsgs.length === 6 && /filled up/.test(fullMsgs[0]?.body.message ?? ''), fullMsgs[0]?.body);
-  const row = (await db.query('SELECT member_count, max_members FROM conversations WHERE id = $1', [g.id])).rows[0];
-  const real = (await db.query('SELECT count(*)::int AS n FROM conversation_members WHERE conversation_id = $1', [g.id])).rows[0].n;
-  check('stored count never goes over the limit and matches real members', row.member_count === 3 && real === 3, { row, real });
-  await sleep(500);
-  const live = watcher.seen.filter((s) => s.e === 'group:count' && s.p.id === g.id);
-  check('a watcher of the group list got live counts, ending full', live.length >= 1 && live[live.length - 1].p.memberCount === 3 && live[live.length - 1].p.full === true, live.map((l) => l.p));
+  const crowdG = await Promise.all(Array.from({ length: N }, (_, i) => user(`g${i}`)));
+  const joins = await Promise.all(crowdG.map((u) => call('POST', `/groups/${g.id}/join`, u.token)));
+  check(`all ${N} could join (membership has no limit)`, joins.every((r) => r.status === 200), joins.map((r) => r.status));
+  const row = (await db.query('SELECT member_count FROM conversations WHERE id = $1', [g.id])).rows[0];
+  check('member count is exact', row.member_count === N + 1, row);
+  crowdG.forEach((u) => u.sock.emit('conv:join', { conversationId: g.id }));
+  await sleep(1500);
+  const outside = crowdG.filter((u) => u.seen.some((s) => s.e === 'conv:full' && s.p.conversationId === g.id));
+  check(`exactly 2 were told it's full right now (got ${outside.length})`, outside.length === 2);
+  check('the full message carries the limit', outside[0]?.seen.find((s) => s.e === 'conv:full')?.p.capacity === ROOM_LIVE_CAPACITY);
+  const live = watcher.seen.filter((s) => s.e === 'group:count' && s.p.id === g.id).pop()?.p;
+  check(`group list watchers see ${ROOM_LIVE_CAPACITY}/${ROOM_LIVE_CAPACITY} in, full`, live?.liveCount === ROOM_LIVE_CAPACITY && live?.full === true && live?.memberCount === N + 1, live);
   const listed = (await call('GET', '/groups/discover?category=Gaming', watcher.token)).body;
   const card = (listed.items ?? listed).find((x: any) => x.id === g.id);
-  check('the group list says 3 / 3 and full', card?.memberCount === 3 && card?.maxMembers === 3 && card?.full === true, card);
-  const winner = joiners[results.findIndex((r) => r.status === 200)]!;
-  await call('POST', `/groups/${g.id}/leave`, winner.token);
-  await sleep(400);
-  const after = watcher.seen.filter((s) => s.e === 'group:count' && s.p.id === g.id).pop();
-  check('someone leaving frees a seat, live', after?.p.memberCount === 2 && after?.p.full === false, after?.p);
+  check('the group list says full right now', card?.liveCount === ROOM_LIVE_CAPACITY && card?.capacity === ROOM_LIVE_CAPACITY && card?.full === true, card);
+  const waiting = outside[0]!;
+  const send = await call('POST', `/conversations/${g.id}/messages`, waiting.token, { clientId: randomUUID(), type: 'text', body: 'hi' });
+  check('sending without a seat is refused with ROOM_FULL', send.status === 403 && send.body.code === 'ROOM_FULL', send);
+  const seated = crowdG.find((u) => !outside.includes(u))!;
+  waiting.seen.length = 0;
+  seated.sock.emit('conv:leave', { conversationId: g.id });
+  await sleep(800);
+  const freed = waiting.seen.filter((s) => s.e === 'group:count' && s.p.id === g.id).pop()?.p;
+  check('someone closing the chat frees a seat, live (people waiting hear it)', freed?.liveCount === ROOM_LIVE_CAPACITY - 1 && freed?.full === false, freed);
+  waiting.sock.emit('conv:join', { conversationId: g.id });
+  await sleep(600);
+  const send2 = await call('POST', `/conversations/${g.id}/messages`, waiting.token, { clientId: randomUUID(), type: 'text', body: 'in!' });
+  check('the waiting person gets in and can send', send2.status === 200 || send2.status === 201, send2);
+  watcher.seen.length = 0;
+  crowdG.filter((u) => !outside.includes(u) && u !== seated)[0]!.sock.disconnect();
+  await sleep(800);
+  const dropped = watcher.seen.filter((s) => s.e === 'group:count' && s.p.id === g.id).pop()?.p;
+  check('a dropped connection frees its seat too', dropped?.liveCount === ROOM_LIVE_CAPACITY - 1, dropped);
 
   console.log('\nChats: search and member chat lists');
   const finder = await user('finder');
   const found = (await call('GET', `/search?q=${encodeURIComponent(g.title.slice(0, 8))}`, finder.token)).body;
   const hit = found.groups.find((x: any) => x.id === g.id);
-  check('search shows the group with live count and room left', hit?.memberCount === 2 && hit?.maxMembers === 3 && hit?.full === false && hit?.joined === false, hit);
+  check('search shows the group with who is in now', hit?.liveCount === ROOM_LIVE_CAPACITY - 1 && hit?.capacity === ROOM_LIVE_CAPACITY && hit?.joined === false, hit);
+  const late = await call('POST', `/groups/${g.id}/join`, finder.token);
+  check('joining from search always works', late.status === 200, late.body);
   const ownerList = (await call('GET', '/conversations', owner.token)).body;
   const mine = ownerList.find((x: any) => x.id === g.id);
-  check("the group in a member's chat list carries its capacity", mine?.maxMembers === 3 && mine?.memberCount === 2, mine);
-  owner.seen.length = 0;
-  const filler = await user('filler');
-  await call('POST', `/groups/${g.id}/join`, filler.token);
-  await sleep(500);
-  check("a member's chat list gets the live count (no chat open)", owner.seen.some((s) => s.e === 'group:count' && s.p.id === g.id && s.p.memberCount === 3 && s.p.full === true), owner.seen.map((s) => s.p));
-  const late = await call('POST', `/groups/${g.id}/join`, finder.token);
-  check('joining a full group from search gets the "filled up" message', late.status === 409 && late.body.code === 'GROUP_FULL', late.body);
+  check("a member's chat list carries live count and capacity", mine?.capacity === ROOM_LIVE_CAPACITY && mine?.liveCount === ROOM_LIVE_CAPACITY - 1, mine);
+  crowdG.forEach((u) => u.sock.disconnect());
 
   console.log(`\nPlaza: ${PLAZA_CAPACITY} spots, ${PLAZA_CAPACITY + 4} people enter at the same moment`);
   const lobby = await user('lobby');
@@ -110,12 +119,12 @@ async function main() {
   await Promise.all(members.map((u) => call('POST', `/groups/${room.id}/join`, u.token)));
   members.forEach((u) => u.sock.emit('conv:join', { conversationId: room.id }));
   await sleep(1500);
-  const full = members.filter((u) => u.seen.some((s) => s.e === 'stage:full' && s.p.conversationId === room.id)).length;
+  const full = members.filter((u) => u.seen.some((s) => (s.e === 'stage:full' || s.e === 'conv:full') && s.p.conversationId === room.id)).length;
   check(`exactly 3 waited outside a full room (got ${full})`, full === 3);
   members.forEach((u) => u.sock.disconnect());
 
   console.log(`\n${pass} passed, ${fail} failed`);
-  [owner, watcher, lobby, host, ...joiners].forEach((u) => u.sock.disconnect());
+  [owner, watcher, lobby, host, finder].forEach((u) => u.sock.disconnect());
   await db.end();
   process.exit(fail ? 1 : 0);
 }

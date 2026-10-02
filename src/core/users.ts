@@ -5,6 +5,8 @@ import { onlineMap } from '../lib/presence.js';
 import { DEFAULT_CHAT_STYLE, initialsOf } from '../shared/rules.js';
 import { WALLPAPERS, type ChatStyle, type Companion, type Me, type Mood, type Outfit, type PaletteId, type Person, type UserStyle, type EquippedSlots } from '../shared/types.js';
 import { resolveEquippedSlots } from '../shared/catalog.js';
+import { ROOM_LIVE_CAPACITY } from '../shared/types.js';
+import { liveCounts } from './live.js';
 import { getEntitlements } from './entitlements.js';
 import { ensureQuests } from './companion.js';
 import { isApproved } from './approval.js';
@@ -244,16 +246,17 @@ export async function search(userId: string, term: string) {
         AND NOT EXISTS (SELECT 1 FROM friendships f WHERE f.status = 'blocked' AND ((f.user_id = u.id AND f.friend_id = $1) OR (f.user_id = $1 AND f.friend_id = u.id)))
       ORDER BY (u.handle ILIKE $3) DESC, u.display_name LIMIT 20`, [userId, like, `${term}%`],
   );
-  const groups = await q<{ id: string; title: string; member_count: number; max_members: number; plus_only: boolean; joined: boolean }>(
-    `SELECT c.id, c.title, c.member_count, c.max_members, c.plus_only,
+  const groups = await q<{ id: string; title: string; member_count: number; plus_only: boolean; joined: boolean }>(
+    `SELECT c.id, c.title, c.member_count, c.plus_only,
             EXISTS (SELECT 1 FROM conversation_members m WHERE m.conversation_id = c.id AND m.user_id = $2) AS joined
        FROM conversations c WHERE c.kind = 'group' AND c.is_public AND c.title ILIKE $1 ORDER BY c.member_count DESC LIMIT 20`, [like, userId],
   );
+  const live = await liveCounts(groups.map((g) => g.id));
   return {
     people: await toPeople(people),
     groups: groups.map((g) => ({
-      id: g.id, title: g.title, memberCount: g.member_count, maxMembers: g.max_members, full: g.member_count >= g.max_members,
-      plusOnly: g.plus_only, joined: g.joined,
+      id: g.id, title: g.title, memberCount: g.member_count, liveCount: live[g.id] ?? 0, capacity: ROOM_LIVE_CAPACITY,
+      full: (live[g.id] ?? 0) >= ROOM_LIVE_CAPACITY, plusOnly: g.plus_only, joined: g.joined,
     })),
   };
 }

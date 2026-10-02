@@ -3,8 +3,9 @@ import { rooms, toRoom, toUser, toUsers } from '../lib/emitter.js';
 import { AppError, E } from '../lib/errors.js';
 import { isOnline, onlineMap } from '../lib/presence.js';
 import { LIMITS, initialsOf, previewFor } from '../shared/rules.js';
+import { liveCount, liveCounts } from './live.js';
 import { friendStreakView, utcDay } from '../shared/retention.js';
-import type { ConversationDetail, ConversationSummary, EventCard, GroupCard, MemberReceipt, Message } from '../shared/types.js';
+import { ROOM_LIVE_CAPACITY, type ConversationDetail, type ConversationSummary, type EventCard, type GroupCard, type MemberReceipt, type Message } from '../shared/types.js';
 import { isPlus, requirePlus } from './entitlements.js';
 import { isBlocked } from './users.js';
 
@@ -70,7 +71,7 @@ function toSummary(r: SummaryRow, viewerId: string): ConversationSummary {
       : null,
     unread: r.unread,
     memberCount: r.member_count,
-    ...(r.kind === 'group' ? { maxMembers: r.max_members } : {}),
+    ...(r.kind === 'group' ? { capacity: ROOM_LIVE_CAPACITY } : {}),
     plusOnly: r.plus_only,
     otherUserId: r.other_id,
     muted: !!r.muted_until && r.muted_until.getTime() > Date.now(),
@@ -81,13 +82,28 @@ function toSummary(r: SummaryRow, viewerId: string): ConversationSummary {
   };
 }
 
-/** A public group's live head count, to everyone looking at the group list and to its members. */
-export async function broadcastGroupCount(id: string) {
-  const c = await one<{ member_count: number; max_members: number; is_public: boolean; kind: string }>(
-    'SELECT member_count, max_members, is_public, kind FROM conversations WHERE id = $1', [id],
+const pendingCounts = new Map<string, ReturnType<typeof setTimeout>>();
+/**
+ * A group's live numbers (members, and how many are in the chat right now out of ROOM_LIVE_CAPACITY) to everyone
+ * looking at the group list, everyone in the chat and every member's chat list. Bursts of joins and leaves are
+ * batched (one send per group every 300 ms).
+ */
+export function broadcastGroupCount(id: string): Promise<void> {
+  if (!pendingCounts.has(id)) {
+    pendingCounts.set(id, setTimeout(() => {
+      pendingCounts.delete(id);
+      sendGroupCount(id).catch(() => {});
+    }, 300));
+  }
+  return Promise.resolve();
+}
+async function sendGroupCount(id: string) {
+  const c = await one<{ member_count: number; is_public: boolean; kind: string }>(
+    'SELECT member_count, is_public, kind FROM conversations WHERE id = $1', [id],
   );
   if (!c || c.kind !== 'group') return;
-  const payload = { id, memberCount: c.member_count, maxMembers: c.max_members, full: c.member_count >= c.max_members };
+  const live = await liveCount(id);
+  const payload = { id, memberCount: c.member_count, liveCount: live, capacity: ROOM_LIVE_CAPACITY, full: live >= ROOM_LIVE_CAPACITY };
   if (c.is_public) toRoom(rooms.discover, 'group:count', payload);
   toRoom(rooms.conv(id), 'group:count', payload);
   // Members see it in their chat list too (not only while the chat is open).
@@ -99,7 +115,12 @@ export async function listConversations(userId: string): Promise<ConversationSum
   const rows = await q<SummaryRow>(`${SUMMARY_SQL} AND NOT m.archived ORDER BY m.pinned DESC, c.last_message_at DESC NULLS LAST, c.created_at DESC`, [userId]);
   // Seed each DM's presence dot; live 'presence' events keep it current after this.
   const online = await onlineMap([...new Set(rows.map((r) => r.other_id).filter((x): x is string => !!x))]);
-  return rows.map((r) => ({ ...toSummary(r, userId), otherOnline: r.other_id ? online[r.other_id] ?? false : false }));
+  const live = await liveCounts(rows.filter((r) => r.kind === 'group').map((r) => r.id));
+  return rows.map((r) => ({
+    ...toSummary(r, userId),
+    otherOnline: r.other_id ? online[r.other_id] ?? false : false,
+    ...(r.kind === 'group' ? { liveCount: live[r.id] ?? 0 } : {}),
+  }));
 }
 
 export async function summaryFor(userId: string, conversationId: string, db?: Db): Promise<ConversationSummary | null> {
@@ -226,11 +247,12 @@ export async function discoverGroups(userId: string, category?: string): Promise
       ORDER BY c.member_count DESC, c.created_at DESC LIMIT 50`,
     category ? [userId, category] : [userId],
   );
+  const live = await liveCounts(rows.map((r) => r.id));
   return {
     items: rows.map((r) => ({
       id: r.id, title: r.title, description: r.description ?? '', category: r.category ?? 'For you', memberCount: r.member_count,
       avatarColor: r.avatar_color, initials: initialsOf(r.title), plusOnly: r.plus_only, joined: r.joined,
-      maxMembers: r.max_members, full: r.member_count >= r.max_members,
+      liveCount: live[r.id] ?? 0, capacity: ROOM_LIVE_CAPACITY, full: (live[r.id] ?? 0) >= ROOM_LIVE_CAPACITY,
     })),
     next: null,
   };
@@ -244,23 +266,14 @@ export async function joinGroup(userId: string, id: string): Promise<Conversatio
   if (c.plus_only) await requirePlus(userId, 'plus_group');
   const existing = await one('SELECT 1 FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [id, userId]);
   if (!existing) {
-    // Claim a seat atomically: the count only goes up while there's room, so two people joining at the same moment
-    // can never both take the last seat. Whoever loses gets GROUP_FULL (and the insert is rolled back).
-    const joined = await tx(async (t) => {
-      const seat = await one<{ last_seq: number }>(
-        'UPDATE conversations SET member_count = member_count + 1 WHERE id = $1 AND member_count < max_members RETURNING last_seq', [id], t,
-      );
-      if (!seat) return false;
+    // Membership has no limit (what's limited is how many are in the chat at once, see core/live.ts).
+    await tx(async (t) => {
+      const row = await one<{ last_seq: number }>('SELECT last_seq FROM conversations WHERE id = $1 FOR UPDATE', [id], t);
       // New members start "caught up": history is readable, but it doesn't count as unread.
-      const ins = await t.query(`INSERT INTO conversation_members (conversation_id, user_id, read_seq, delivered_seq) VALUES ($1,$2,$3,$3) ON CONFLICT DO NOTHING`, [id, userId, seat.last_seq]);
-      // Already a member (a double tap racing itself): give the seat back.
-      if ((ins.rowCount ?? 0) === 0) await t.query('UPDATE conversations SET member_count = member_count - 1 WHERE id = $1', [id]);
-      return true;
+      const ins = await t.query(`INSERT INTO conversation_members (conversation_id, user_id, read_seq, delivered_seq) VALUES ($1,$2,$3,$3) ON CONFLICT DO NOTHING`, [id, userId, row!.last_seq]);
+      // Count only a real new member (a double tap racing itself inserts nothing).
+      if ((ins.rowCount ?? 0) > 0) await t.query('UPDATE conversations SET member_count = member_count + 1 WHERE id = $1', [id]);
     });
-    if (!joined) {
-      await broadcastGroupCount(id);
-      throw new AppError(409, 'GROUP_FULL', 'This group just filled up. Try again later!');
-    }
     await broadcastGroupCount(id);
     const u = await one<{ display_name: string }>('SELECT display_name FROM users WHERE id = $1', [userId]);
     const { sendSystem } = await import('./messages.js');
