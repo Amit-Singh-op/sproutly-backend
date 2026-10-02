@@ -3,7 +3,7 @@
  * Legal screen. Written from what Sproutly actually collects. Review before publishing; not legal advice.
  */
 export const CONTACT_EMAIL = 'sproutlyy.app@gmail.com';
-export const LEGAL_UPDATED = '30 September 2026';
+export const LEGAL_UPDATED = '2 October 2026';
 
 export type LegalDoc = { title: string; intro: string; sections: [heading: string, body: string][] };
 
@@ -26,6 +26,7 @@ export const PRIVACY: LegalDoc = {
       'To run the app: sign you in, deliver your messages, show your companion, stories and posts to the right people, send the notifications you have turned on, apply your subscription, keep the service safe (rate limits, blocking, reports) and fix bugs. We do not sell your data and we do not show ads.'],
     ['Who can see what',
       '• Messages: only the people in that chat.\n'
+      + '• Plaza: while you have the Plaza open, people in the same spot see your companion, your name, where you walk, your emotes and the short lines you say there. People you block never see you, and you never see them.\n'
       + '• Stories, Show off posts and your online status: your friends and people you share a chat with. People you block never see them.\n'
       + '• Your name, username, profile photo, companion and level: people you chat with or who find you in search.\n'
       + '• When you have a chat open, the others in it see your companion in its room.'],
@@ -36,6 +37,7 @@ export const PRIVACY: LegalDoc = {
       + '• Stories disappear after 24 hours and are then deleted.\n'
       + '• Show off posts appear in feeds for 72 hours; you can delete your own at any time.\n'
       + '• Friend updates are kept for 30 days and app usage records for 180 days, then deleted.\n'
+      + '• Plaza chat lines are never saved to our database: the last few in each spot are kept for 10 minutes so people arriving can see them, then deleted.\n'
       + '• Everything else (profile, companion, friends, settings) is kept while your account exists.\n'
       + '• When you delete your account we delete your profile, companion, friends, posts, stories, sessions and devices, and messages you sent are wiped.\n'
       + '• Server logs are kept for up to 30 days. Copies in our providers\' backups expire on their normal schedules.'],
