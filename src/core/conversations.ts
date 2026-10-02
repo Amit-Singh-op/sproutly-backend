@@ -29,7 +29,7 @@ interface SummaryRow {
   id: string; kind: 'dm' | 'group'; title: string | null; avatar_color: string; last_seq: number; last_message_at: Date | null;
   member_count: number; max_members: number; plus_only: boolean; muted_until: Date | null; pinned: boolean; unread: number;
   other_id: string | null; other_name: string | null; other_color: string | null; other_avatar_url: string | null;
-  lm_type: Message['type'] | null; lm_body: string | null; lm_payload: Message['payload']; lm_deleted_at: Date | null; lm_sender: string | null; lm_sender_name: string | null;
+  lm_type: Message['type'] | null; lm_body: string | null; lm_payload: Message['payload']; lm_deleted_at: Date | null; lm_sender: string | null; lm_at: Date | null; lm_sender_name: string | null;
   fs_count: number | null; fs_last_day: string | null; fs_a_day: string | null; fs_b_day: string | null;
 }
 
@@ -39,7 +39,7 @@ const SUMMARY_SQL = `
          (SELECT count(*)::int FROM messages x WHERE x.conversation_id = c.id AND x.seq > m.read_seq AND x.created_at > now() - interval '3 days'
              AND x.sender_id IS DISTINCT FROM m.user_id AND x.deleted_at IS NULL AND x.type <> 'system') AS unread,
          o.id AS other_id, o.display_name AS other_name, o.avatar_color AS other_color, o.avatar_url AS other_avatar_url,
-         lm.type AS lm_type, lm.body AS lm_body, lm.payload AS lm_payload, lm.deleted_at AS lm_deleted_at, lm.sender_id AS lm_sender,
+         lm.type AS lm_type, lm.body AS lm_body, lm.payload AS lm_payload, lm.deleted_at AS lm_deleted_at, lm.sender_id AS lm_sender, lm.created_at AS lm_at,
          su.display_name AS lm_sender_name,
          fs.count AS fs_count, fs.last_day AS fs_last_day, fs.a_day AS fs_a_day, fs.b_day AS fs_b_day
     FROM conversation_members m
@@ -48,7 +48,14 @@ const SUMMARY_SQL = `
       SELECT u.id, u.display_name, u.avatar_color, u.avatar_url FROM conversation_members m2 JOIN users u ON u.id = m2.user_id
        WHERE c.kind = 'dm' AND m2.conversation_id = c.id AND m2.user_id <> m.user_id LIMIT 1
     ) o ON TRUE
-    LEFT JOIN messages lm ON lm.id = c.last_message_id AND lm.created_at > now() - interval '3 days'
+    -- The newest message worth showing in the list: older chats can end in a "X joined" / "X left" note, which stays quiet.
+    LEFT JOIN LATERAL (
+      SELECT x.* FROM messages x
+       WHERE x.conversation_id = c.id AND x.created_at > now() - interval '3 days'
+         AND NOT (x.type = 'system' AND (x.payload->>'event' = 'member_left'
+              OR (x.payload->>'event' = 'member_joined' AND x.payload->>'text' NOT LIKE '%created the group')))
+       ORDER BY x.seq DESC LIMIT 1
+    ) lm ON TRUE
     LEFT JOIN users su ON su.id = lm.sender_id
     LEFT JOIN friend_streaks fs ON c.kind = 'dm' AND o.id IS NOT NULL
          AND fs.user_a = LEAST(m.user_id, o.id) AND fs.user_b = GREATEST(m.user_id, o.id)
@@ -64,7 +71,7 @@ function toSummary(r: SummaryRow, viewerId: string): ConversationSummary {
     avatarUrl: r.kind === 'dm' ? r.other_avatar_url : null,
     initials: initialsOf(title),
     lastSeq: r.last_seq,
-    lastMessageAt: r.last_message_at?.toISOString() ?? null,
+    lastMessageAt: (r.lm_at ?? r.last_message_at)?.toISOString() ?? null,
     lastMessagePreview: r.lm_type
       ? previewFor({ type: r.lm_type, body: r.lm_body, payload: r.lm_payload, deletedAt: r.lm_deleted_at?.toISOString() ?? null },
         { isGroup: r.kind === 'group', senderName: r.lm_sender_name ?? '', mine: r.lm_sender === viewerId })
@@ -274,10 +281,8 @@ export async function joinGroup(userId: string, id: string): Promise<Conversatio
       // Count only a real new member (a double tap racing itself inserts nothing).
       if ((ins.rowCount ?? 0) > 0) await t.query('UPDATE conversations SET member_count = member_count + 1 WHERE id = $1', [id]);
     });
+    // No "X joined" message: who comes and goes stays quiet (the member count still updates live).
     await broadcastGroupCount(id);
-    const u = await one<{ display_name: string }>('SELECT display_name FROM users WHERE id = $1', [userId]);
-    const { sendSystem } = await import('./messages.js');
-    await sendSystem(id, 'member_joined', `${u?.display_name ?? 'Someone'} joined`);
   } else {
     await q('UPDATE conversation_members SET archived = FALSE WHERE conversation_id = $1 AND user_id = $2', [id, userId]);
   }
@@ -290,15 +295,13 @@ export async function leaveGroup(userId: string, id: string) {
   const m = await requireMember(userId, id);
   const c = await one<{ kind: string }>('SELECT kind FROM conversations WHERE id = $1', [id]);
   if (c?.kind !== 'group') throw E.badRequest('You can only leave groups');
-  const u = await one<{ display_name: string }>('SELECT display_name FROM users WHERE id = $1', [userId]);
   await tx(async (t) => {
     await q('DELETE FROM conversation_members WHERE conversation_id = $1 AND user_id = $2', [id, userId], t);
     await q('UPDATE conversations SET member_count = GREATEST(member_count - 1, 0) WHERE id = $1', [id], t);
   });
   void m;
+  // Leaving is quiet too (no "X left" message).
   await broadcastGroupCount(id);
-  const { sendSystem } = await import('./messages.js');
-  await sendSystem(id, 'member_left', `${u?.display_name ?? 'Someone'} left`);
 }
 
 export async function patchMembership(userId: string, id: string, p: { mutedUntil?: string | null; pinned?: boolean; archived?: boolean }) {
