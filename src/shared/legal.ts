@@ -41,6 +41,10 @@ export const PRIVACY: LegalDoc = {
       + '• Everything else (profile, companion, friends, settings) is kept while your account exists.\n'
       + '• When you delete your account we delete your profile, companion, friends, posts, stories, sessions and devices, and messages you sent are wiped.\n'
       + '• Server logs are kept for up to 30 days. Copies in our providers\' backups expire on their normal schedules.'],
+    ['Permissions on your phone',
+      '• Camera and photos: only when you choose to take or pick a photo for your profile picture, a story or a Show off post. Nothing is uploaded unless you post it.\n'
+      + '• Notifications: to tell you about private messages, @mentions and the reminders you turn on. You can turn them off in Profile or in your phone settings.\n'
+      + '• Sproutly does not ask for your location, contacts or microphone.'],
     ['Security',
       'Data is encrypted in transit (HTTPS). Sign-in codes and session tokens are stored only as secure hashes. Photos can only be uploaded through a signed, one-time permission from our server.'],
     ['Your choices and rights',
@@ -57,9 +61,10 @@ export const TERMS: LegalDoc = {
   intro: `By using Sproutly you agree to these terms. Questions: ${CONTACT_EMAIL}.`,
   sections: [
     ['Your account', 'You need a valid email address to sign in. Keep access to it safe; anyone with access to your email can sign in as you. You are responsible for activity on your account. You must be at least 13 years old to use Sproutly.'],
-    ['Be kind', 'Do not use Sproutly to harass, threaten, spam or impersonate anyone, or to share illegal, hateful, sexual or violent content, in chats, stories, posts or photos. We may remove content and suspend or delete accounts that break these rules. You can block and report people, messages, stories and posts in the app; content reported by several people may be hidden or removed automatically.'],
+    ['Be kind', 'Do not use Sproutly to harass, threaten, spam or impersonate anyone, or to share illegal, hateful, sexual or violent content, in chats, the Plaza, stories, posts or photos. We may remove content and suspend or delete accounts that break these rules. You can block and report people, messages, stories and posts in the app; content reported by several people may be hidden or removed automatically.'],
     ['Your content', 'You own what you post, including photos. You give us permission to store it and show it to the people you share it with, only to run the app. Only post photos you have the right to share.'],
     ['Messages and stories are temporary', 'Chat messages are deleted automatically 3 days after they are sent, and stories after 24 hours. Save anything you want to keep.'],
+    ['Coins and items', 'Coins, eggs, shields, outfits and other in-app items are earned by using Sproutly. They have no real-world value, cannot be bought, sold or exchanged for money or anything outside the app, and are not refundable. We may change how they are earned or what they do, and they end when your account is deleted.'],
     ['Sproutly Plus', 'Plus is an optional subscription sold through Google Play or the App Store, billed monthly or yearly at the price shown in the app before you buy. If a free trial is offered, you are charged when it ends unless you cancel before then. It renews automatically until you cancel it in your store account settings, at least 24 hours before the renewal date. Refunds follow the store\'s policies. Deleting your Sproutly account does not cancel a store subscription.'],
     ['Availability', 'We work to keep Sproutly running, but it is provided "as is" and may change or be interrupted. To the extent allowed by law, we are not liable for indirect losses from using the app.'],
     ['Ending', 'You can stop using Sproutly and delete your account at any time. We may end or suspend accounts that break these terms.'],

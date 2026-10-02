@@ -544,6 +544,8 @@ export interface ServiceEvents {
   'stage:presence': StagePresence;
   'stage:full': StageFull;
   connection: { connected: boolean };
+  /** App-only (never sent by the server): the saved sign-in was rejected, so the app signs out. */
+  'session:expired': { reason: 'expired' };
 }
 export type EventName = keyof ServiceEvents;
 
