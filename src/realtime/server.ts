@@ -13,6 +13,7 @@ import { one, q } from '../db/pool.js';
 import { rooms, toUsers } from '../lib/emitter.js';
 import { AppError, publicValidationMessage } from '../lib/errors.js';
 import { verifyAccess } from '../lib/jwt.js';
+import { guardSocket } from '../lib/guard.js';
 import { log } from '../lib/log.js';
 import { ONLINE_SET, dropPresence, isOnline, touchPresence, viewingKey } from '../lib/presence.js';
 import { redis } from '../lib/redis.js';
@@ -150,6 +151,8 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
   });
 
   io.on('connection', async (raw) => {
+    // Flood guard: a modified client spamming events gets throttled, then disconnected.
+    guardSocket(raw);
     const socket = raw as S;
     const userId = socket.data.userId;
     socket.data.rooms = new Set();

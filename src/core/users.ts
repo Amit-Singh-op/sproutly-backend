@@ -1,4 +1,5 @@
 import type pg from 'pg';
+import { toUsers } from '../lib/emitter.js';
 import { one, q, type Db } from '../db/pool.js';
 import { E } from '../lib/errors.js';
 import { onlineMap } from '../lib/presence.js';
@@ -225,9 +226,11 @@ export async function addFriend(userId: string, friendId: string) {
      ON CONFLICT (user_id, friend_id) DO UPDATE SET status = 'accepted' WHERE friendships.status <> 'blocked'`,
     [userId, friendId],
   );
+  toUsers([userId, friendId], 'social:update', { userId });
 }
 export async function removeFriend(userId: string, friendId: string) {
   await q(`DELETE FROM friendships WHERE status = 'accepted' AND ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1))`, [userId, friendId]);
+  toUsers([userId, friendId], 'social:update', { userId });
 }
 export async function blockUser(userId: string, targetId: string) {
   if (userId === targetId) throw E.badRequest("You can't block yourself");
@@ -236,6 +239,8 @@ export async function blockUser(userId: string, targetId: string) {
     `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1,$2,'blocked')
      ON CONFLICT (user_id, friend_id) DO UPDATE SET status = 'blocked'`, [userId, targetId],
   );
+  // Both sides stop seeing each other's stories and posts right away.
+  toUsers([userId, targetId], 'social:update', { userId });
 }
 
 export async function search(userId: string, term: string) {

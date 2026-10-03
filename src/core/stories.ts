@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { audienceIds } from './audience.js';
+import { toUsers } from '../lib/emitter.js';
 import { one, q } from '../db/pool.js';
 import { E } from '../lib/errors.js';
 import { isOwnCloudinaryUrl } from '../lib/cloudinary.js';
@@ -80,6 +82,7 @@ export async function createStory(userId: string, input: NewStory): Promise<Stor
     if (!text) throw E.badRequest('Write something first');
     await q('INSERT INTO stories (user_id, kind, text, bg) VALUES ($1, $2, $3, $4)', [userId, 'text', text, input.bg]);
   }
+  void audienceIds(userId).then((ids) => toUsers(ids, 'stories:update', { userId })).catch(() => {});
   return listStories(userId);
 }
 
@@ -87,13 +90,17 @@ export async function createStory(userId: string, input: NewStory): Promise<Stor
 export async function deleteStory(userId: string, storyId: string) {
   const r = await q('DELETE FROM stories WHERE id = $1 AND user_id = $2 RETURNING id', [storyId, userId]);
   if (r.length === 0) throw E.notFound('Story not found');
+  void audienceIds(userId).then((ids) => toUsers(ids, 'stories:update', { userId })).catch(() => {});
 }
 
 /** Records a view (idempotent). Viewing your own story doesn't count. */
 export async function viewStory(userId: string, storyId: string) {
-  await q(
+  const r = await q<{ owner: string }>(
     `INSERT INTO story_views (story_id, viewer_id)
      SELECT s.id, $1 FROM stories s WHERE s.id = $2 AND s.user_id <> $1 AND s.expires_at > now() AND ${AUDIENCE('s.user_id')}
-     ON CONFLICT DO NOTHING`, [userId, storyId],
+     ON CONFLICT DO NOTHING
+     RETURNING (SELECT user_id FROM stories WHERE id = $2) AS owner`, [userId, storyId],
   );
+  // A first view: the owner's view count updates live (only the owner is told, and only that the row changed).
+  if (r[0]?.owner) toUsers([r[0].owner], 'stories:update', { userId: r[0].owner });
 }

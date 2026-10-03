@@ -7,6 +7,13 @@ import { COMMENT_MAX, SHOWCASE_DAILY_MAX, type ShowcaseActivity, type ShowcaseCo
 import { isPlus } from './entitlements.js';
 import { isOwnCloudinaryUrl } from '../lib/cloudinary.js';
 import { AUDIENCE } from './stories.js';
+import { audienceIds } from './audience.js';
+import { toUsers } from '../lib/emitter.js';
+
+/** Live updates to everyone who can see the author's posts (never blocks the request). */
+function live(authorId: string, send: (ids: string[]) => void) {
+  void audienceIds(authorId).then(send).catch(() => {});
+}
 
 interface PostRow {
   id: string; user_id: string; caption: string; image_url: string | null; activity: ShowcaseActivity | null; snapshot: ShowcasePost['snapshot']; cheer_count: number; created_at: Date; kind: ShowcaseKind; comment_count: number;
@@ -75,6 +82,7 @@ export async function createPost(userId: string, rawCaption: string, imageUrl?: 
     return p!.id;
   });
   await enqueue.fanout({ postId: id });
+  live(userId, (ids) => toUsers(ids, 'showcase:new', { postId: id, userId }));
   return getPost(userId, id);
 }
 
@@ -92,6 +100,7 @@ export async function cheer(userId: string, postId: string, on: boolean) {
   });
   if (changed && on && post.user_id !== userId) await enqueue.push(`cheer:${postId}:${userId}`, { kind: 'cheer', postId, fromUserId: userId });
   const r = await one<{ cheer_count: number }>('SELECT cheer_count FROM showcase_posts WHERE id = $1', [postId]);
+  if (changed) live(post.user_id, (ids) => toUsers(ids, 'showcase:update', { postId, cheerCount: r!.cheer_count }));
   return { cheerCount: r!.cheer_count, cheeredByMe: on };
 }
 
@@ -99,6 +108,7 @@ export async function cheer(userId: string, postId: string, on: boolean) {
 export async function deletePost(userId: string, postId: string) {
   const r = await q('DELETE FROM showcase_posts WHERE id = $1 AND user_id = $2 RETURNING id', [postId, userId]);
   if (r.length === 0) throw E.notFound('Post not found');
+  live(userId, (ids) => toUsers(ids, 'showcase:delete', { postId }));
 }
 
 // ---------- comments (day posts only) ----------
@@ -141,17 +151,21 @@ export async function addComment(userId: string, postId: string, rawBody: string
     return { id: r!.id, count: n!.comment_count };
   });
   const row = await one<CommentRow>(`${COMMENT_SELECT} WHERE c.id = $1`, [id]);
+  const owner = await one<{ user_id: string }>('SELECT user_id FROM showcase_posts WHERE id = $1', [postId]);
+  if (owner) live(owner.user_id, (ids) => toUsers(ids, 'showcase:update', { postId, commentCount: count }));
   return { comment: toComment(row!), commentCount: count };
 }
 
 /** The comment's author, or the post's owner, can delete it. */
 export async function deleteComment(userId: string, commentId: string): Promise<{ postId: string; commentCount: number }> {
-  return tx(async (c) => {
-    const r = await one<{ post_id: string }>(
+  const res = await tx(async (c) => {
+    const r = await one<{ post_id: string; owner: string }>(
       `DELETE FROM showcase_comments sc USING showcase_posts p
-        WHERE sc.id = $1 AND p.id = sc.post_id AND (sc.user_id = $2 OR p.user_id = $2) RETURNING sc.post_id`, [commentId, userId], c);
+        WHERE sc.id = $1 AND p.id = sc.post_id AND (sc.user_id = $2 OR p.user_id = $2) RETURNING sc.post_id, p.user_id AS owner`, [commentId, userId], c);
     if (!r) throw E.notFound('Comment not found');
     const n = await one<{ comment_count: number }>(recount, [r.post_id], c);
-    return { postId: r.post_id, commentCount: n?.comment_count ?? 0 };
+    return { postId: r.post_id, owner: r.owner, commentCount: n?.comment_count ?? 0 };
   });
+  live(res.owner, (ids) => toUsers(ids, 'showcase:update', { postId: res.postId, commentCount: res.commentCount }));
+  return { postId: res.postId, commentCount: res.commentCount };
 }

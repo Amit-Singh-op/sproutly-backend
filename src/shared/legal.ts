@@ -3,7 +3,7 @@
  * Legal screen. Written from what Sproutly actually collects. Review before publishing; not legal advice.
  */
 export const CONTACT_EMAIL = 'sproutlyy.app@gmail.com';
-export const LEGAL_UPDATED = '2 October 2026';
+export const LEGAL_UPDATED = '3 October 2026';
 
 export type LegalDoc = { title: string; intro: string; sections: [heading: string, body: string][] };
 
@@ -29,7 +29,9 @@ export const PRIVACY: LegalDoc = {
       + '• Plaza: while you have the Plaza open, people in the same spot see your companion, your name, where you walk, your emotes and the short lines you say there. People you block never see you, and you never see them.\n'
       + '• Stories, Show off posts and your online status: your friends and people you share a chat with. People you block never see them.\n'
       + '• Your name, username, profile photo, companion and level: people you chat with or who find you in search.\n'
-      + '• When you have a chat open, the others in it see your companion in its room.'],
+      + '• When you have a chat open, the others in it see your companion in its room.\n'
+      + '• Groups: anyone browsing groups sees each group\'s member count and how many people are in its chat right now (a number, not who). Groups have no member limit; up to 25 people can be in a group chat at the same time.\n'
+      + '• Updates are live: new stories, Show off posts, cheers, comments and who is online reach the people allowed to see them as they happen.'],
     ['Who we share it with',
       'Only with services that run Sproutly for us, under their own privacy terms: Render (servers and live data such as who is online), Neon (database), Cloudinary (storing and delivering the photos you upload), Resend (sign-in code emails), Google Firebase Cloud Messaging (push notifications), RevenueCat and Google Play / Apple App Store (subscriptions). We may disclose information if required by law.'],
     ['How long we keep it',
@@ -46,7 +48,12 @@ export const PRIVACY: LegalDoc = {
       + '• Notifications: to tell you about private messages, @mentions and the reminders you turn on. You can turn them off in Profile or in your phone settings.\n'
       + '• Sproutly does not ask for your location, contacts or microphone.'],
     ['Security',
-      'Data is encrypted in transit (HTTPS). Sign-in codes and session tokens are stored only as secure hashes. Photos can only be uploaded through a signed, one-time permission from our server.'],
+      '• Data is encrypted in transit (HTTPS), and our servers send strict security headers.\n'
+      + '• Sign-in codes and session tokens are stored only as secure hashes. Codes expire after 10 minutes and allow a few tries; sessions renew with one-time tokens, and a reused token signs that session out everywhere.\n'
+      + '• On your phone, your session is kept in the system\'s secure storage (Android Keystore / iOS Keychain).\n'
+      + '• We limit how often requests can be made (per account and per network address) to stop spam, code guessing and abuse. To do this we briefly process your IP address; see Technical data above.\n'
+      + '• Every action is checked on our servers: you can only read chats you are in, edit or delete your own content, and see what people have chosen to share with you.\n'
+      + '• Photos can only be uploaded through a signed, one-time permission from our server.'],
     ['Your choices and rights',
       `• Change your display name and profile photo in the app at any time.\n• Turn notifications on or off (Profile → Notifications). Notifications are only sent for private chats and when someone @mentions you in a group.\n• Turn reminders on or off (Profile → Reminders). Reminders (daily gift, streak about to end, coming back after a break) are scheduled on your phone, not sent by our servers.\n• Turn off read receipts or mute chats in the app.\n• Delete your own stories and Show off posts at any time.\n• Block and report people, messages, stories and posts in the app.\n• Delete your account in the app (Profile → Delete account) or at https://sproutly-backend.onrender.com/delete-account.\n• Ask for a copy of your data or any other privacy request by emailing ${CONTACT_EMAIL}.`],
     ['Children',

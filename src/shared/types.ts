@@ -394,6 +394,8 @@ export type SendAck =
   | { ok: false; code: string; message: string };
 
 export interface RoomInfo { ownerId: UUID; ownerName: string; companion: Companion; theme: 'basic' | 'cabin'; decor: string[] }
+/** Someone invited you to visit their room (pending, from the last week). */
+export interface RoomInvite { id: UUID; hostId: UUID; hostName: string; hostInitials: string; hostColor: string; hostUrl?: string | null; createdAt: string }
 
 export interface RoomState { ownerId: UUID; night: boolean; music: boolean; visitors: { userId: UUID; palette: PaletteId; outfit: Outfit; name: string }[] }
 
@@ -542,6 +544,17 @@ export interface ServiceEvents {
   'plaza:kick': { spot: PlazaSpotId; userId: UUID; ball: PlazaBall };
   'plaza:counts': PlazaSpotInfo[];
   'group:count': GroupCount;
+  /** A new Show off post you can see (fetch it with getPost: visibility is checked there). */
+  'showcase:new': { postId: UUID; userId: UUID };
+  /** Live counts on a post you can see. */
+  'showcase:update': { postId: UUID; cheerCount?: number; commentCount?: number };
+  'showcase:delete': { postId: UUID };
+  /** Someone you can see added or removed a story: reload the story row. */
+  'stories:update': { userId: UUID };
+  /** Your friends or blocks changed (you or the other person): reload stories and the Show off feed. */
+  'social:update': { userId: UUID };
+  /** Your room invites changed (a new one for you, or one you sent was answered): reload them. */
+  'invites:update': Record<string, never>;
   /** You opened a group chat that's at its at-once limit: you can read it and you're let in when a seat frees up. */
   'conv:full': { conversationId: UUID; capacity: number; count: number };
   'wallet:update': { coins: number };

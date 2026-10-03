@@ -1,4 +1,5 @@
 import cors from '@fastify/cors';
+import { registerHttpGuards } from '../lib/guard.js';
 import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 import { config } from '../config.js';
@@ -50,6 +51,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     }
   });
   await app.register(cors, { origin: config.CORS_ORIGINS === '*' ? true : config.CORS_ORIGINS.split(',') });
+  // Per-IP limits and security headers on every response.
+  registerHttpGuards(app);
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof AppError) return reply.status(err.status).send({ code: err.code, message: err.message, ...err.extra });

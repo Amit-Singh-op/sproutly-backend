@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { currentEvent } from '../../core/conversations.js';
 import { getDrop, claimDrop } from '../../core/drops.js';
 import { listGuestbook, signGuestbook } from '../../core/guestbook.js';
-import { cheerRoom, getRoom, invite, respond } from '../../core/rooms.js';
+import { cheerRoom, getRoom, invite, listInvites, respond } from '../../core/rooms.js';
 import { COMMENT_MAX, GUESTBOOK_STICKERS, SHOWCASE_ACTIVITIES } from '../../shared/types.js';
 import { LIMITS } from '../../shared/rules.js';
 import { addComment, cheer, createPost, deleteComment, deletePost, feed, getPost, listComments } from '../../core/showcase.js';
@@ -61,6 +61,7 @@ export async function socialRoutes(app: FastifyInstance) {
     const raw = (req.params as { userId: string }).userId;
     return getRoom(req.userId, raw === 'me' ? req.userId : UserId.parse(req.params).userId);
   });
+  app.get('/rooms/invites', async (req) => listInvites(req.userId));
   app.post('/rooms/invites', async (req) => invite(req.userId, z.object({ guestId: z.string().uuid() }).parse(req.body).guestId));
   app.post('/rooms/invites/:id/respond', async (req) => {
     await respond(req.userId, Id.parse(req.params).id, z.object({ accept: z.boolean() }).parse(req.body).accept);
