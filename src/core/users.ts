@@ -77,6 +77,18 @@ interface CompanionRow {
   last_action_at?: Date | null;
   last_active_day?: string | null;
 }
+/**
+ * A companion's full outfit, every slot (hat and scarf and so on), from its stored row, merged with the single
+ * legacy outfit for accounts dressed before slots existed. Send this wherever a companion is described, so clients
+ * draw everything it's wearing, not just one item.
+ */
+export function slotsOf(raw: EquippedSlots | string | null | undefined, outfit: Outfit | null | undefined): EquippedSlots {
+  let parsed: EquippedSlots | null = null;
+  if (typeof raw === 'string') { try { parsed = JSON.parse(raw) as EquippedSlots; } catch { parsed = null; } }
+  else if (raw && typeof raw === 'object') parsed = raw;
+  return resolveEquippedSlots(parsed, outfit ?? 'none');
+}
+
 export const companionFromRow = (r: CompanionRow): Companion => {
   let equippedSlots: EquippedSlots | undefined = undefined;
   if (r.equipped_slots) {
@@ -146,11 +158,11 @@ export async function getMe(userId: string): Promise<Me> {
 export async function userStyles(ids: string[]): Promise<UserStyle[]> {
   if (ids.length === 0) return [];
   const rows = await q<{
-    id: string; display_name: string; handle: string; avatar_color: string; avatar_url: string | null; plus_active: boolean | null; palette: PaletteId; equipped_outfit: Outfit; level: number; signature_move: Mood;
+    id: string; display_name: string; handle: string; avatar_color: string; avatar_url: string | null; plus_active: boolean | null; palette: PaletteId; equipped_outfit: Outfit; equipped_slots: EquippedSlots | string | null; level: number; signature_move: Mood;
     bubble: string | null; text_color: string; border: string; design: ChatStyle['design']; s_avatar: string; animation: ChatStyle['animation']; wallpaper: string | null; version: number | null;
     avatar_animation: ChatStyle['avatarAnimation'] | null; avatar_effect: ChatStyle['avatarEffect'] | null; avatar_charm: ChatStyle['avatarCharm'] | null;
   }>(
-    `SELECT u.id, u.display_name, u.handle, u.avatar_color, u.avatar_url, e.plus_active, c.palette, c.equipped_outfit, c.level, c.signature_move,
+    `SELECT u.id, u.display_name, u.handle, u.avatar_color, u.avatar_url, e.plus_active, c.palette, c.equipped_outfit, c.equipped_slots, c.level, c.signature_move,
             s.bubble, s.text_color, s.border, s.design, s.avatar_color AS s_avatar, s.animation, s.wallpaper, s.version,
             s.avatar_animation, s.avatar_effect, s.avatar_charm
        FROM users u
@@ -167,7 +179,7 @@ export async function userStyles(ids: string[]): Promise<UserStyle[]> {
       userId: r.id, displayName: r.display_name, initials: initialsOf(r.display_name),
       handle: r.handle, avatarUrl: r.avatar_url,
       avatarColor: plus && style ? style.avatar : r.avatar_color, isPlus: plus, style,
-      companion: { palette: r.palette ?? 'mo', outfit: r.equipped_outfit ?? 'none', level: r.level ?? 1, signatureMove: r.signature_move ?? 'wave' },
+      companion: { palette: r.palette ?? 'mo', outfit: r.equipped_outfit ?? 'none', equippedSlots: slotsOf(r.equipped_slots, r.equipped_outfit), level: r.level ?? 1, signatureMove: r.signature_move ?? 'wave' },
       // Version changes whenever anything visible changes (style saved, plan changed) so client caches refresh.
       version: (r.version ?? 0) * 2 + (plus ? 1 : 0),
     };

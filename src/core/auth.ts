@@ -11,6 +11,9 @@ import { isValidTimezone } from '../lib/time.js';
 import { RATE_LIMITS } from '../shared/rules.js';
 import { otpEmail } from './emailTemplate.js';
 import { createUser } from './users.js';
+import { requireNotSuspended } from './suspension.js';
+import { isReviewLogin, ensureReviewPlus } from './review.js';
+import { invalidatePlus } from './entitlements.js';
 
 export interface Tokens { accessToken: string; refreshToken: string; expiresIn: number; isNew?: boolean }
 
@@ -123,11 +126,15 @@ async function signInLogin(login: string, displayName?: string, timezone?: strin
     }
     return { userId: await createUser(c, login, displayName, tz), isNew: true };
   });
+  // The store-review account always has Plus (reviewers must be able to see every feature).
+  if (isReviewLogin(login)) { await ensureReviewPlus(userId); await invalidatePlus(userId); }
   return { ...(await issueTokens(userId)), isNew };
 }
 
 // ---------------- refresh tokens (rotating families) ----------------
 async function issueTokens(userId: string, family: string = randomUUID()): Promise<Tokens> {
+  // Every way in (code, Apple/Google, token refresh) passes here: a suspended account gets no new tokens.
+  await requireNotSuspended(userId);
   const refreshToken = randomBytes(48).toString('base64url');
   await q(
     'INSERT INTO refresh_tokens (user_id, family, token_hash, expires_at) VALUES ($1,$2,$3,$4)',

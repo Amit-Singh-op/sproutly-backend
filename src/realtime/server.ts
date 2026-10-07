@@ -7,12 +7,13 @@ import { config } from '../config.js';
 import { broadcastGroupCount, memberIds, requireMember, summaryFor } from '../core/conversations.js';
 import { leaveLiveSeat, takeLiveSeat } from '../core/live.js';
 import { SendBody, markWatermark, sendMessage } from '../core/messages.js';
-import { presenceAudience } from '../core/users.js';
+import { presenceAudience, slotsOf } from '../core/users.js';
 import { isApproved } from '../core/approval.js';
 import { one, q } from '../db/pool.js';
 import { rooms, toUsers } from '../lib/emitter.js';
 import { AppError, publicValidationMessage } from '../lib/errors.js';
 import { verifyAccess } from '../lib/jwt.js';
+import { suspensionOf } from '../core/suspension.js';
 import { guardSocket } from '../lib/guard.js';
 import { log } from '../lib/log.js';
 import { ONLINE_SET, dropPresence, isOnline, touchPresence, viewingKey } from '../lib/presence.js';
@@ -20,7 +21,7 @@ import { redis } from '../lib/redis.js';
 import { LIMITS } from '../shared/rules.js';
 import { registerPlaza } from './plaza.js';
 import { takeSeat } from '../lib/seats.js';
-import { STAGE_CAPACITY, type RoomState, type SendAck, type StageOccupant } from '../shared/types.js';
+import { STAGE_CAPACITY, type EquippedSlots, type Outfit, type RoomState, type SendAck, type StageOccupant } from '../shared/types.js';
 
 const HEARTBEAT_MS = 25_000;
 const ConvRef = z.object({ conversationId: z.string().uuid() });
@@ -142,6 +143,8 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
     try {
       const token = (socket.handshake.auth as { token?: string } | undefined)?.token;
       socket.data.userId = await verifyAccess(token);
+      // Suspended accounts get no realtime at all.
+      if (await suspensionOf(socket.data.userId)) return next(new Error('ACCOUNT_SUSPENDED'));
       // Invite-only: no realtime (chat, presence) until the account is approved.
       if (!(await isApproved(socket.data.userId))) return next(new Error('approval pending'));
       next();
@@ -323,10 +326,10 @@ export function createRealtime(httpServer: HttpServer = healthServer()) {
       await socket.join(rooms.room(ownerId));
       socket.data.rooms.add(ownerId);
       if (ownerId !== userId) {
-        const v = await one<{ display_name: string; palette: string; equipped_outfit: string }>(
-          'SELECT u.display_name, c.palette, c.equipped_outfit FROM users u JOIN companions c ON c.user_id = u.id WHERE u.id = $1', [userId],
+        const v = await one<{ display_name: string; palette: string; equipped_outfit: string; equipped_slots: EquippedSlots | string | null }>(
+          'SELECT u.display_name, c.palette, c.equipped_outfit, c.equipped_slots FROM users u JOIN companions c ON c.user_id = u.id WHERE u.id = $1', [userId],
         );
-        if (v) await redis.hset(`${roomKey(ownerId)}:visitors`, userId, JSON.stringify({ userId, palette: v.palette, outfit: v.equipped_outfit, name: v.display_name }));
+        if (v) await redis.hset(`${roomKey(ownerId)}:visitors`, userId, JSON.stringify({ userId, palette: v.palette, outfit: v.equipped_outfit, equippedSlots: slotsOf(v.equipped_slots, v.equipped_outfit as Outfit), name: v.display_name }));
       }
       io.to(rooms.room(ownerId)).emit('room:state', await roomState(ownerId));
     }));

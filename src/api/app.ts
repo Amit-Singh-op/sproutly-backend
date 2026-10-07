@@ -7,6 +7,7 @@ import { AppError, GENERIC_MESSAGE, publicHttpMessage, publicValidationMessage }
 import { getAppConfig } from '../core/appConfig.js';
 import { requireApproved } from '../core/approval.js';
 import { verifyAccess } from '../lib/jwt.js';
+import { requireNotSuspended } from '../core/suspension.js';
 import { log } from '../lib/log.js';
 import { authRoutes } from './routes/auth.js';
 import { chatRoutes } from './routes/chat.js';
@@ -33,6 +34,12 @@ const PENDING_ALLOWED = new Set(['GET /v1/me', 'PATCH /v1/me', 'DELETE /v1/me', 
 async function approvalGate(req: FastifyRequest) {
   if (PENDING_ALLOWED.has(`${req.method} ${req.routeOptions.url}`)) return;
   await requireApproved(req.userId);
+}
+
+/** Suspended accounts can't use anything (403 ACCOUNT_SUSPENDED with the reason) except deleting themselves. */
+async function suspensionGate(req: FastifyRequest) {
+  if (`${req.method} ${req.routeOptions.url}` === 'DELETE /v1/me') return;
+  await requireNotSuspended(req.userId);
 }
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -83,6 +90,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     await v1.register(paymentRoutes);
     await v1.register(async (authed) => {
       authed.addHook('onRequest', authenticate);
+      authed.addHook('preHandler', suspensionGate);
       authed.addHook('preHandler', approvalGate);
       await authed.register(meRoutes);
       await authed.register(chatRoutes);

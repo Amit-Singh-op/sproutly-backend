@@ -20,7 +20,8 @@ import {
 } from '../shared/plaza.js';
 import { cleanText } from '../shared/rules.js';
 import { recordSocialQuest } from '../core/companion.js';
-import type { PlazaBall, PlazaEnterResult, PlazaSayResult, PlazaLine, PlazaOccupant, PlazaSpotId, PlazaSpotInfo, PlazaState } from '../shared/types.js';
+import type { EquippedSlots, PlazaBall, PlazaEnterResult, PlazaSayResult, PlazaLine, PlazaOccupant, PlazaSpotId, PlazaSpotInfo, PlazaState } from '../shared/types.js';
+import { slotsOf } from '../core/users.js';
 
 const spotKey = (s: PlazaSpotId) => `plaza:${s}`;
 const linesKey = (s: PlazaSpotId) => `plaza:lines:${s}`;
@@ -157,14 +158,14 @@ export function registerPlaza(io: Server, raw: Socket, ready: Promise<void> = Pr
       const already = here.some((o) => o.userId === userId);
       if (!already && here.length >= PLAZA_CAPACITY) return reply({ ok: false, code: 'FULL', message: 'This spot is full right now. Try another one!' });
 
-      const u = await one<{ display_name: string; palette: PlazaOccupant['palette']; equipped_outfit: PlazaOccupant['outfit']; level: number; plus: boolean }>(
-        `SELECT u.display_name, c.palette, c.equipped_outfit, c.level, COALESCE(e.plus_active, FALSE) AS plus
+      const u = await one<{ display_name: string; palette: PlazaOccupant['palette']; equipped_outfit: PlazaOccupant['outfit']; equipped_slots: EquippedSlots | string | null; level: number; plus: boolean }>(
+        `SELECT u.display_name, c.palette, c.equipped_outfit, c.equipped_slots, c.level, COALESCE(e.plus_active, FALSE) AS plus
            FROM users u JOIN companions c ON c.user_id = u.id LEFT JOIN entitlements e ON e.user_id = u.id WHERE u.id = $1`, [userId],
       );
       if (!u) return reply({ ok: false, code: 'ERROR', message: 'Could not join the Plaza' });
 
       const pos = already ? here.find((o) => o.userId === userId)! : arrivalPoint(() => randomInt(1_000_000) / 1_000_000);
-      const me: PlazaOccupant = { userId, name: u.display_name, palette: u.palette, outfit: u.equipped_outfit, level: u.level, isPlus: u.plus, x: pos.x, y: pos.y };
+      const me: PlazaOccupant = { userId, name: u.display_name, palette: u.palette, outfit: u.equipped_outfit, equippedSlots: slotsOf(u.equipped_slots, u.equipped_outfit), level: u.level, isPlus: u.plus, x: pos.x, y: pos.y };
       // Atomic: if someone took the last spot a moment ago, we're told here instead of squeezing in as #31.
       if (!(await takeSeat(spotKey(spot), userId, JSON.stringify(me), PLAZA_CAPACITY))) {
         scheduleCounts(io);

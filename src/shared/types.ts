@@ -139,7 +139,7 @@ export interface StickerPayload {
   kind: StickerKind;
   /** An emote sticker. `kind` is still set (as a fallback animation) for clients that predate emotes. */
   emote?: Emote;
-  snapshot: { palette: PaletteId; outfit: Outfit };
+  snapshot: { palette: PaletteId; outfit: Outfit; equippedSlots?: EquippedSlots };
 }
 export interface PollPayload {
   question: string;
@@ -244,7 +244,7 @@ export interface UserStyle {
   avatarUrl?: string | null;
   isPlus: boolean;
   style: ChatStyle | null; // null => free styling
-  companion: { palette: PaletteId; outfit: Outfit; level?: number; signatureMove: Mood };
+  companion: { palette: PaletteId; outfit: Outfit; equippedSlots?: EquippedSlots; level?: number; signatureMove: Mood };
   version: number;
 }
 
@@ -281,7 +281,7 @@ export interface ShowcasePost {
   /** What they were doing ("daily activity"). */
   activity?: ShowcaseActivity | null;
   createdAt: string;
-  snapshot: { name: string; level: number; palette: PaletteId; outfit: Outfit; outfitLabel: string; signatureMove: Mood };
+  snapshot: { name: string; level: number; palette: PaletteId; outfit: Outfit; equippedSlots?: EquippedSlots; outfitLabel: string; signatureMove: Mood };
   cheerCount: number;
   cheeredByMe: boolean;
   topOfWeek: boolean;
@@ -397,7 +397,7 @@ export interface RoomInfo { ownerId: UUID; ownerName: string; companion: Compani
 /** Someone invited you to visit their room (pending, from the last week). */
 export interface RoomInvite { id: UUID; hostId: UUID; hostName: string; hostInitials: string; hostColor: string; hostUrl?: string | null; createdAt: string }
 
-export interface RoomState { ownerId: UUID; night: boolean; music: boolean; visitors: { userId: UUID; palette: PaletteId; outfit: Outfit; name: string }[] }
+export interface RoomState { ownerId: UUID; night: boolean; music: boolean; visitors: { userId: UUID; palette: PaletteId; outfit: Outfit; equippedSlots?: EquippedSlots; name: string }[] }
 
 export interface ActionResult {
   mood: Mood; line: string; gain: number; energy: number; level: number; leveledUp: boolean; streak: number; quests: Quest[];
@@ -648,6 +648,8 @@ export interface PlazaOccupant {
   name: string;
   palette: PaletteId;
   outfit: Outfit;
+  /** Everything it's wearing, slot by slot. */
+  equippedSlots?: EquippedSlots;
   level: number;
   isPlus: boolean;
   /** 0..1 of the stage. */

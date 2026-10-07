@@ -9,7 +9,8 @@ import { log } from '../lib/log.js';
 import { enqueue } from '../lib/queues.js';
 import { limit } from '../lib/ratelimit.js';
 import { LIMITS, RATE_LIMITS, cleanText, emotesFor, neutralPreview, previewFor } from '../shared/rules.js';
-import { EMOTES, STICKER_KINDS, type Message, type PollPayload, type SystemPayload } from '../shared/types.js';
+import { EMOTES, STICKER_KINDS, type EquippedSlots, type Message, type Outfit, type PollPayload, type SystemPayload } from '../shared/types.js';
+import { slotsOf } from './users.js';
 import { isPlus } from './entitlements.js';
 import { memberIds, requireMember, summaryFor } from './conversations.js';
 import { requireLiveSeat } from './live.js';
@@ -145,11 +146,11 @@ export async function sendMessage(userId: string, input: SendBody): Promise<Mess
   if (input.type === 'sticker') {
     if (!(await isPlus(userId))) throw E.plusRequired('sticker');
     await limit(`sticker:u:${userId}`, RATE_LIMITS.stickerPerUser, 'Too many stickers, give it a second');
-    const comp = await one<{ palette: string; equipped_outfit: string }>('SELECT palette, equipped_outfit FROM companions WHERE user_id = $1', [userId]);
+    const comp = await one<{ palette: string; equipped_outfit: string; equipped_slots: EquippedSlots | string | null }>('SELECT palette, equipped_outfit, equipped_slots FROM companions WHERE user_id = $1', [userId]);
     const palette = comp?.palette ?? 'mo';
     // Emotes are per species: a drake can't send a bot's "glitch".
     if (input.payload.emote && !emotesFor(palette).includes(input.payload.emote)) throw E.badRequest("Your companion doesn't have that emote");
-    payload = { kind: input.payload.kind, ...(input.payload.emote ? { emote: input.payload.emote } : {}), snapshot: { palette, outfit: comp?.equipped_outfit ?? 'none' } };
+    payload = { kind: input.payload.kind, ...(input.payload.emote ? { emote: input.payload.emote } : {}), snapshot: { palette, outfit: comp?.equipped_outfit ?? 'none', equippedSlots: slotsOf(comp?.equipped_slots, comp?.equipped_outfit as Outfit | undefined) } };
   } else if (input.type === 'poll') {
     payload = { question: input.payload.question, options: input.payload.options };
   } else {

@@ -3,7 +3,8 @@ import { E } from '../lib/errors.js';
 import { enqueue } from '../lib/queues.js';
 import { limit } from '../lib/ratelimit.js';
 import { LIMITS, RATE_LIMITS, cleanText, initialsOf, outfitName } from '../shared/rules.js';
-import { COMMENT_MAX, SHOWCASE_DAILY_MAX, type ShowcaseActivity, type ShowcaseComment, type ShowcaseKind, type ShowcasePost } from '../shared/types.js';
+import { COMMENT_MAX, SHOWCASE_DAILY_MAX, type EquippedSlots, type Outfit, type ShowcaseActivity, type ShowcaseComment, type ShowcaseKind, type ShowcasePost } from '../shared/types.js';
+import { slotsOf } from './users.js';
 import { isPlus } from './entitlements.js';
 import { isOwnCloudinaryUrl } from '../lib/cloudinary.js';
 import { AUDIENCE } from './stories.js';
@@ -70,14 +71,14 @@ export async function createPost(userId: string, rawCaption: string, imageUrl?: 
     await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`showcase:${userId}`]);
     const recent = await one<{ n: number }>(`SELECT count(*)::int AS n FROM showcase_posts WHERE user_id = $1 AND created_at > now() - interval '24 hours'`, [userId], c);
     if ((recent?.n ?? 0) >= SHOWCASE_DAILY_MAX) throw E.conflict(`You've shared ${SHOWCASE_DAILY_MAX} moments today. Come back tomorrow!`, { nextPostAt: await nextPostAt(userId) });
-    const comp = await one<{ name: string; level: number; palette: string; equipped_outfit: string; signature_move: string }>(
-      'SELECT name, level, palette, equipped_outfit, signature_move FROM companions WHERE user_id = $1', [userId], c,
+    const comp = await one<{ name: string; level: number; palette: string; equipped_outfit: string; equipped_slots: EquippedSlots | string | null; signature_move: string }>(
+      'SELECT name, level, palette, equipped_outfit, equipped_slots, signature_move FROM companions WHERE user_id = $1', [userId], c,
     );
     const plus = await isPlus(userId);
     // Plus companions wear the glow aura on top of their outfit; the app draws the aura when the label mentions it.
     const outfit = comp!.equipped_outfit;
     const label = !plus || outfit === 'aura' ? outfitName(outfit) : outfit === 'none' ? 'Glow aura' : `${outfitName(outfit)} + Glow aura`;
-    const snapshot = { name: comp!.name, level: comp!.level, palette: comp!.palette, outfit: comp!.equipped_outfit, outfitLabel: label, signatureMove: comp!.signature_move };
+    const snapshot = { name: comp!.name, level: comp!.level, palette: comp!.palette, outfit: comp!.equipped_outfit, equippedSlots: slotsOf(comp!.equipped_slots, comp!.equipped_outfit as Outfit), outfitLabel: label, signatureMove: comp!.signature_move };
     const p = await one<{ id: string }>('INSERT INTO showcase_posts (user_id, caption, image_url, activity, snapshot, kind) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [userId, caption, imageUrl ?? null, activity ?? null, JSON.stringify(snapshot), k], c);
     return p!.id;
   });

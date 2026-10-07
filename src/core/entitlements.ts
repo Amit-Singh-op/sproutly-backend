@@ -6,6 +6,7 @@ import { redis } from '../lib/redis.js';
 import { isPlusMove, isPlusOutfit, isPlusPalette } from '../shared/rules.js';
 import type { Entitlements } from '../shared/types.js';
 import { peersOf, userStyleOf } from './users.js';
+import { isReviewLogin } from './review.js';
 
 const cacheKey = (userId: string) => `ent:${userId}`;
 
@@ -60,6 +61,11 @@ export interface SubscriptionState {
  * Returns true when plus_active changed.
  */
 export async function applySubscription(userId: string, s: SubscriptionState, eventMs: number): Promise<boolean> {
+  // The store-review account keeps Plus whatever the store says (it has no real purchase to report).
+  if (!s.active) {
+    const u = await one<{ login: string }>('SELECT login FROM users WHERE id = $1', [userId]);
+    if (isReviewLogin(u?.login)) return false;
+  }
   const changed = await tx(async (c) => {
     const cur = await one<{ last_event_ms: number; plus_active: boolean }>(
       `SELECT COALESCE(s.last_event_ms, 0) AS last_event_ms, COALESCE(e.plus_active, FALSE) AS plus_active
