@@ -33,7 +33,7 @@ export async function seed() {
          description = EXCLUDED.description`,
       [
         i.id,
-        i.slot === 'head' || i.slot === 'body' || i.slot === 'face' ? 'outfit' : i.slot,
+        ['head', 'body', 'face', 'top', 'bottom', 'shoes', 'neck'].includes(i.slot) ? 'outfit' : i.slot,
         i.name,
         i.plusOnly,
         0,
