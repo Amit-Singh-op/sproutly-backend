@@ -4,6 +4,7 @@ import { companionAction, ensureQuests, patchCompanion } from '../../core/compan
 import { equipSlots, getCatalogItems, getUserInventory, markInventorySeen } from '../../core/inventory.js';
 import { getWallet } from '../../core/ledger.js';
 import { catalog, markSeen } from '../../core/misc.js';
+import { buyItem, getLooks, saveLook } from '../../core/wardrobe.js';
 import { ChatStyleBody, getStyle, saveStyle } from '../../core/styles.js';
 import { getCompanion } from '../../core/users.js';
 import { getEgg, hatchEgg } from '../../core/eggs.js';
@@ -53,6 +54,17 @@ export async function companionRoutes(app: FastifyInstance) {
     if (query.slot) return getCatalogItems(req.userId, query.slot);
     if (query.kind) return catalog(req.userId, query.kind);
     return getCatalogItems(req.userId);
+  });
+  // Wardrobe: buy an item with coins, and saved looks.
+  app.post('/catalog/buy', async (req) => {
+    const { itemId } = z.object({ itemId: z.string().min(1).max(64) }).parse(req.body);
+    return buyItem(req.userId, itemId);
+  });
+  app.get('/companion/looks', async (req) => ({ looks: await getLooks(req.userId) }));
+  app.put('/companion/looks/:idx', async (req) => {
+    const { idx } = z.object({ idx: z.coerce.number().int().min(0).max(2) }).parse(req.params);
+    const body = z.object({ name: z.string().max(40).default(''), slots: z.record(z.string().nullable().optional()) }).parse(req.body);
+    return saveLook(req.userId, idx, body.name, body.slots);
   });
   app.post('/catalog/seen', async (req) => {
     await markSeen(req.userId, z.object({ ids: z.array(z.string()).max(100) }).parse(req.body).ids);

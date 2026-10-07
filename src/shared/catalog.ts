@@ -14,9 +14,35 @@ export const CATALOG_ITEMS: CatalogItem[] = [
   // ---------- Face ----------
   { id: 'shades', name: 'Cool Shades', slot: 'face', rarity: 'rare', unlockMethod: 'plus', plusOnly: true, description: 'Sleek dark shades for sunny vibes.' },
 
-  // ---------- Body ----------
-  { id: 'scarf', name: 'Cozy Scarf', slot: 'body', rarity: 'common', unlockMethod: 'reward', plusOnly: false, priceCoins: 100, description: 'Warm knitted winter scarf.' },
-  { id: 'hoodie', name: 'Classic Hoodie', slot: 'body', rarity: 'rare', unlockMethod: 'level', unlockRequirement: 10, plusOnly: false, description: 'Super soft everyday hoodie.' },
+  // ---------- Top (jackets, hoodies, tees) ----------
+  { id: 'tee_basic', name: 'Basic Tee', slot: 'top', rarity: 'common', unlockMethod: 'starter', plusOnly: false, description: 'A soft everyday tee.' },
+  { id: 'tee_stripe', name: 'Striped Tee', slot: 'top', rarity: 'common', unlockMethod: 'shop', plusOnly: false, priceCoins: 80, description: 'Breton stripes for sunny days.' },
+  { id: 'hoodie', name: 'Classic Hoodie', slot: 'top', rarity: 'rare', unlockMethod: 'level', unlockRequirement: 10, plusOnly: false, description: 'Super soft everyday hoodie.' },
+  { id: 'bomber', name: 'Bomber Jacket', slot: 'top', rarity: 'rare', unlockMethod: 'shop', plusOnly: false, priceCoins: 150, description: 'Olive flight jacket with ribbed cuffs.' },
+  { id: 'denim_jacket', name: 'Denim Jacket', slot: 'top', rarity: 'rare', unlockMethod: 'shop', plusOnly: false, priceCoins: 160, description: 'Classic washed denim with gold stitching.' },
+  { id: 'knit', name: 'Cozy Knit', slot: 'top', rarity: 'rare', unlockMethod: 'shop', plusOnly: false, priceCoins: 120, description: 'Chunky cable-knit sweater.' },
+  { id: 'puffer', name: 'Puffer Jacket', slot: 'top', rarity: 'epic', unlockMethod: 'plus', plusOnly: true, description: 'Puffy, shiny and toasty warm.' },
+  { id: 'varsity', name: 'Varsity Jacket', slot: 'top', rarity: 'epic', unlockMethod: 'reward', plusOnly: false, description: 'Earned at a Sproutly event. Go team!' },
+
+  // ---------- Bottom ----------
+  { id: 'jeans', name: 'Blue Jeans', slot: 'bottom', rarity: 'common', unlockMethod: 'starter', plusOnly: false, description: 'Your go-to denim.' },
+  { id: 'joggers', name: 'Comfy Joggers', slot: 'bottom', rarity: 'common', unlockMethod: 'shop', plusOnly: false, priceCoins: 80, description: 'Lounge-ready and stretchy.' },
+  { id: 'cargos', name: 'Cargo Pants', slot: 'bottom', rarity: 'rare', unlockMethod: 'shop', plusOnly: false, priceCoins: 110, description: 'Pockets for every snack.' },
+  { id: 'shorts', name: 'Summer Shorts', slot: 'bottom', rarity: 'common', unlockMethod: 'shop', plusOnly: false, priceCoins: 60, description: 'Breezy shorts for warm days.' },
+  { id: 'skirt', name: 'Pleated Skirt', slot: 'bottom', rarity: 'rare', unlockMethod: 'shop', plusOnly: false, priceCoins: 100, description: 'A twirly pleated skirt.' },
+
+  // ---------- Shoes ----------
+  { id: 'sneakers', name: 'Classic Sneakers', slot: 'shoes', rarity: 'common', unlockMethod: 'starter', plusOnly: false, description: 'Clean white kicks.' },
+  { id: 'slides', name: 'Slides', slot: 'shoes', rarity: 'common', unlockMethod: 'shop', plusOnly: false, priceCoins: 50, description: 'Comfy slides for chilling.' },
+  { id: 'boots', name: 'Trail Boots', slot: 'shoes', rarity: 'rare', unlockMethod: 'shop', plusOnly: false, priceCoins: 140, description: 'Sturdy boots for every adventure.' },
+  { id: 'hightops', name: 'High-tops', slot: 'shoes', rarity: 'epic', unlockMethod: 'plus', plusOnly: true, description: 'Court-ready high-top sneakers.' },
+  { id: 'rain_boots', name: 'Rain Boots', slot: 'shoes', rarity: 'rare', unlockMethod: 'reward', plusOnly: false, description: 'Puddle-proof, from a Sproutly event.' },
+
+  // ---------- Neck ----------
+  { id: 'scarf', name: 'Cozy Scarf', slot: 'neck', rarity: 'common', unlockMethod: 'reward', plusOnly: false, priceCoins: 100, description: 'Warm knitted winter scarf.' },
+  { id: 'neck_bandana', name: 'Neck Bandana', slot: 'neck', rarity: 'common', unlockMethod: 'shop', plusOnly: false, priceCoins: 70, description: 'A cowboy-style neck bandana.' },
+  { id: 'bowtie', name: 'Bow Tie', slot: 'neck', rarity: 'rare', unlockMethod: 'shop', plusOnly: false, priceCoins: 90, description: 'Dapper for special occasions.' },
+  { id: 'chain', name: 'Gold Chain', slot: 'neck', rarity: 'epic', unlockMethod: 'plus', plusOnly: true, description: 'A little bling for your companion.' },
 
   // ---------- Back ----------
   { id: 'backpack', name: 'Explorer Pack', slot: 'back', rarity: 'rare', unlockMethod: 'shop', plusOnly: false, priceCoins: 250, description: 'Ready for trails and adventures.' },
@@ -93,14 +119,24 @@ export function slotOfOutfit(outfitId: Outfit | string): CatalogSlot {
   if (item) return item.slot;
   if (['party', 'flower', 'wizard', 'crown', 'cap', 'bandana', 'headphones'].includes(outfitId)) return 'head';
   if (['shades'].includes(outfitId)) return 'face';
-  if (['scarf', 'hoodie'].includes(outfitId)) return 'body';
+  if (outfitId === 'scarf') return 'neck';
+  if (outfitId === 'hoodie') return 'top';
   if (outfitId === 'aura') return 'trail';
   return 'head';
 }
 
 /** Merges legacy single outfit and multi-slot equipped mapping into a unified EquippedSlots map. */
+/** Items that used to live in the shared 'body' slot, and the slot they moved to (so saved outfits keep them). */
+const LEGACY_BODY: Record<string, 'neck' | 'top'> = { scarf: 'neck', hoodie: 'top' };
+
 export function resolveEquippedSlots(slots?: Partial<EquippedSlots> | null, singleOutfit?: Outfit): EquippedSlots {
   const result: EquippedSlots = { ...(slots ?? {}) };
+  // Outfits saved before tops and neckwear had their own slots: move them over.
+  const legacy = result.body ? LEGACY_BODY[result.body] : undefined;
+  if (legacy) {
+    if (!result[legacy]) (result as Record<string, string | undefined>)[legacy] = result.body;
+    delete result.body;
+  }
   if (singleOutfit && singleOutfit !== 'none') {
     const slot = slotOfOutfit(singleOutfit);
     if (!result[slot]) {
@@ -116,6 +152,7 @@ export function primaryOutfitFromSlots(slots?: Partial<EquippedSlots> | null): O
   if (slots.head && OUTFITS.includes(slots.head as Outfit)) return slots.head as Outfit;
   if (slots.face && OUTFITS.includes(slots.face as Outfit)) return slots.face as Outfit;
   if (slots.body && OUTFITS.includes(slots.body as Outfit)) return slots.body as Outfit;
+  if (slots.neck && OUTFITS.includes(slots.neck as Outfit)) return slots.neck as Outfit;
   if (slots.trail === 'aura') return 'aura';
   return 'none';
 }

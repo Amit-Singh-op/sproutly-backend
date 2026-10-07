@@ -2,7 +2,8 @@ import type pg from 'pg';
 import { one, q } from '../db/pool.js';
 import { toUsers } from '../lib/emitter.js';
 import { AppError, E } from '../lib/errors.js';
-import { CATALOG_ITEMS, getCatalogItem, itemAccess, primaryOutfitFromSlots, resolveEquippedSlots } from '../shared/catalog.js';
+import { itemAccess, primaryOutfitFromSlots, resolveEquippedSlots } from '../shared/catalog.js';
+import { liveCatalog, liveItem, type LiveItem } from './wardrobe.js';
 import type { CatalogItem, CatalogSlot, Companion, EquippedSlots, UserInventoryItem } from '../shared/types.js';
 import { isPlus } from './entitlements.js';
 import { companionFromRow, getCompanion, peersOf, userStyleOf } from './users.js';
@@ -27,8 +28,9 @@ export async function getCatalogItems(userId: string, slot?: CatalogSlot): Promi
   );
   const invMap = new Map(inventoryRows.map((r) => [r.item_id, r]));
 
-  // Pull catalog items from DB if populated, falling back to CATALOG_ITEMS
-  let items = CATALOG_ITEMS;
+  // The live catalog (built-in items with admin overrides). Items that aren't available right now (an expired drop,
+  // a hidden item) are left out unless you already own them.
+  let items: LiveItem[] = (await liveCatalog()).filter((i) => i.available || invMap.has(i.id));
   if (slot) {
     items = items.filter((i) => i.slot === slot);
   }
@@ -122,7 +124,7 @@ export async function equipSlots(
   const ctx = { plus, level: comp.level, owned: new Set(inventoryRows.map((r) => r.item_id)) };
   for (const [slot, itemId] of Object.entries(newSlots)) {
     if (!itemId || itemId === 'none' || (currentSlots as Record<string, string | undefined>)[slot] === itemId) continue;
-    const catItem = getCatalogItem(itemId);
+    const catItem = await liveItem(itemId);
     if (!catItem) throw E.badRequest('Unknown item');
     if (catItem.slot !== slot) throw E.badRequest(`${catItem.name} doesn't go in that slot`);
     const access = itemAccess(catItem, ctx);

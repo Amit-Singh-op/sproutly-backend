@@ -37,7 +37,7 @@ export const ACTION_RULES: Record<CompanionAction, { mood: Mood; gain: number; l
 export const ENERGY_PER_LEVEL = 1000;
 
 // ---------- catalog & inventory v2 ----------
-export const CATALOG_SLOTS = ['body', 'head', 'face', 'back', 'hand', 'colour', 'emote', 'trail', 'frame'] as const;
+export const CATALOG_SLOTS = ['body', 'head', 'face', 'top', 'bottom', 'shoes', 'neck', 'back', 'hand', 'colour', 'emote', 'trail', 'frame'] as const;
 export type CatalogSlot = (typeof CATALOG_SLOTS)[number];
 
 export const RARITIES = ['common', 'rare', 'epic', 'legendary', 'mythic'] as const;
@@ -57,6 +57,12 @@ export interface CatalogItem {
   priceCoins?: number;
   description?: string;
   assetKey?: string;
+  /** Set by GET /catalog: false = not on sale right now (an expired drop or hidden item you already own). */
+  available?: boolean;
+  /** A limited drop: when it leaves. */
+  availableUntil?: string;
+  /** Highlighted as a new drop. */
+  featuredNew?: boolean;
   owned?: boolean;
   locked?: boolean;
   lockReason?: 'plus' | 'level' | 'not_owned';
@@ -64,9 +70,14 @@ export interface CatalogItem {
 }
 
 export interface EquippedSlots {
+  /** Legacy: tops and neckwear saved before they had their own slots (resolveEquippedSlots moves them). */
   body?: string;
   head?: string;
   face?: string;
+  top?: string;
+  bottom?: string;
+  shoes?: string;
+  neck?: string;
   back?: string;
   hand?: string;
   colour?: PaletteId;
