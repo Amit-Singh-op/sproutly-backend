@@ -47,6 +47,9 @@ const ACTIONS: Record<string, Rule> = {
   'POST /v1/drops/today/claim': { points: 20, windowS: MIN, message: 'Slow down a little.' },
   'POST /v1/egg/hatch': { points: 20, windowS: MIN, message: 'Slow down a little.' },
   'POST /v1/quests/chest/claim': { points: 20, windowS: MIN, message: 'Slow down a little.' },
+  'POST /v1/games/:game/start': { points: 120, windowS: HOUR, message: "You've played a lot of games this hour. Give Mo a little break." },
+  'POST /v1/games/sessions/:id/finish': { points: 120, windowS: HOUR, message: "You've played a lot of games this hour. Give Mo a little break." },
+  'GET /v1/games/:game/leaderboard': { points: 120, windowS: MIN, message: 'Slow down a little.' },
   'POST /v1/purchases/sync': { points: 10, windowS: MIN, message: 'Slow down a little.' },
 };
 
