@@ -33,6 +33,7 @@ const DELETE_PAGE = page('Delete your account', `
 <p class="muted">This permanently deletes your profile, companion, friends, posts and sessions. Messages you sent are wiped and show as "Message deleted" to others. This can't be undone.</p>
 <p style="margin-top:12px"><b>In the app:</b> Profile → Delete account.<br><b>Here:</b> confirm your email below.</p>
 <p class="muted" style="margin-top:12px">If you subscribed to Sproutly Plus, cancel it in Google Play (Payments &amp; subscriptions) as well; deleting your account doesn't cancel it.</p>
+<p class="muted" style="margin-top:12px">A suspended account can be deleted too. Records of reports and suspensions are kept for up to 2 years for safety (see the <a href="/privacy">Privacy Policy</a>), and a suspended email can't be used to sign up again while the suspension lasts.</p>
 <div class="card">
   <label for="email"><b>Your account email</b></label>
   <input id="email" type="email" autocomplete="email" placeholder="you@mail.com">
@@ -66,7 +67,8 @@ const DELETE_DATA_PAGE = page('Delete your data', `
 • <b>A Show off post:</b> tap the bin on your post.
 • <b>A comment:</b> long-press it → Delete. You can also remove any comment on your own post.
 • <b>Your profile photo:</b> Profile → your photo → Remove or change it.
-• <b>Friends and blocks:</b> Profile → Friends → remove someone.</p>
+• <b>Friends and blocks:</b> Profile → Friends → remove someone.
+• <b>A saved look:</b> Closet → My looks → save over it with a different outfit.</p>
 </div>
 <h2>Deleted automatically</h2>
 <p>Chat messages are deleted from our servers after 3 days. Stories are deleted after 24 hours. Show off posts leave the feed after 72 hours.</p>
@@ -90,10 +92,12 @@ const CHILD_SAFETY_PAGE = page('Child safety standards', `
 <h2>How we prevent it</h2>
 <p>• Anyone can report a user, message, story, post or comment from inside the app. Content reported by several people is hidden automatically while we review it.
 • Anyone can block another user, which stops all contact and hides their content.
+• An account reported by several different people within a few days is suspended automatically while we review it: it is signed out at once, cannot sign in, and its email cannot be used to sign up again.
+• When something is reported we keep a copy of it, even if it is later deleted, so reviews and reports to the authorities have the evidence they need.
 • Messages are limited in rate to prevent spam, and chat messages are deleted from our servers after 3 days.
 • We review reports and act on them promptly.</p>
 <h2>What we do when we find it</h2>
-<p>• We remove the content and permanently ban the accounts involved.
+<p>• We remove the content and permanently ban the accounts involved (they are signed out immediately and cannot return with the same email).
 • We preserve the relevant information as required by law.
 • We report apparent CSAM to the National Center for Missing &amp; Exploited Children (NCMEC) and to the relevant regional and national authorities, and we cooperate with law enforcement.</p>
 <h2>How to report</h2>

@@ -2,6 +2,7 @@ import { one, q } from '../db/pool.js';
 import { E } from '../lib/errors.js';
 import { LIMITS } from '../shared/rules.js';
 import { isPlus } from './entitlements.js';
+import { recordReport } from './moderation.js';
 
 export async function registerDevice(userId: string, platform: 'ios' | 'android', pushToken: string, appVersion?: string) {
   // A push token belongs to one account at a time (shared phones / sign-out -> sign-in as someone else).
@@ -15,10 +16,13 @@ export async function registerDevice(userId: string, platform: 'ios' | 'android'
 
 /** Reports queue; a showcase post is auto-hidden after 5 distinct reports. */
 export async function report(userId: string, targetType: 'user' | 'message' | 'post' | 'story' | 'comment', targetId: string, reason: string) {
-  await q(
+  const inserted = await q<{ id: string }>(
     `INSERT INTO reports (reporter_id, target_type, target_id, reason) VALUES ($1,$2,$3,$4)
-     ON CONFLICT (reporter_id, target_type, target_id) DO NOTHING`, [userId, targetType, targetId, reason.slice(0, 500)],
+     ON CONFLICT (reporter_id, target_type, target_id) DO NOTHING RETURNING id`, [userId, targetType, targetId, reason.slice(0, 500)],
   );
+  // A new report (not a repeat): keep a copy of what was reported, and suspend the account if enough different
+  // people have reported it recently. Done before anything below can delete the content.
+  if (inserted.length) await recordReport(userId, targetType, targetId, reason.slice(0, 500));
   if (targetType === 'post') {
     const n = await one<{ n: number }>(`SELECT count(*)::int AS n FROM reports WHERE target_type = 'post' AND target_id = $1`, [targetId]);
     if ((n?.n ?? 0) >= LIMITS.reportsToHide) await q('UPDATE showcase_posts SET hidden = TRUE WHERE id = $1', [targetId]);

@@ -575,6 +575,8 @@ export interface ServiceEvents {
   'stage:full': StageFull;
   connection: { connected: boolean };
   /** App-only (never sent by the server): the saved sign-in was rejected, so the app signs out. */
+  /** This account was just suspended: sign out now and show the reason. */
+  'account:suspended': { message: string };
   'session:expired': { reason: 'expired' };
 }
 export type EventName = keyof ServiceEvents;

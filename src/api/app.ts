@@ -7,6 +7,7 @@ import { AppError, GENERIC_MESSAGE, publicHttpMessage, publicValidationMessage }
 import { getAppConfig } from '../core/appConfig.js';
 import { requireApproved } from '../core/approval.js';
 import { verifyAccess } from '../lib/jwt.js';
+import { actionGate } from '../lib/actionLimits.js';
 import { requireNotSuspended } from '../core/suspension.js';
 import { log } from '../lib/log.js';
 import { authRoutes } from './routes/auth.js';
@@ -62,7 +63,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   registerHttpGuards(app);
 
   app.setErrorHandler((err, req, reply) => {
-    if (err instanceof AppError) return reply.status(err.status).send({ code: err.code, message: err.message, ...err.extra });
+    if (err instanceof AppError) {
+      // Rate limits say how long to wait, in the message and as the standard Retry-After header.
+      if (typeof err.extra.retryAfter === 'number') reply.header('Retry-After', String(err.extra.retryAfter));
+      return reply.status(err.status).send({ code: err.code, message: err.message, ...err.extra });
+    }
     // Only AppErrors (our own wording) reach users verbatim. Validation and framework errors get a generic message;
     // the technical detail goes to the logs instead.
     if (err instanceof ZodError) {
@@ -92,6 +97,8 @@ export async function buildApp(): Promise<FastifyInstance> {
       authed.addHook('onRequest', authenticate);
       authed.addHook('preHandler', suspensionGate);
       authed.addHook('preHandler', approvalGate);
+      // Per-account limits: overall, and per action (reports, friend requests, buying, posting...).
+      authed.addHook('preHandler', actionGate);
       await authed.register(meRoutes);
       await authed.register(chatRoutes);
       await authed.register(socialRoutes);

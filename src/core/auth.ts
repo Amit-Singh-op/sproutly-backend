@@ -12,6 +12,7 @@ import { RATE_LIMITS } from '../shared/rules.js';
 import { otpEmail } from './emailTemplate.js';
 import { createUser } from './users.js';
 import { requireNotSuspended } from './suspension.js';
+import { bannedLogin, recordBlockedSignIn } from './moderation.js';
 import { isReviewLogin, ensureReviewPlus } from './review.js';
 import { invalidatePlus } from './entitlements.js';
 
@@ -88,6 +89,12 @@ async function deliverOtp(login: string, code: string) {
 /** POST /auth/otp/start: 6 digits, hashed, 10 min, 5 attempts; 5 codes per hour per login. */
 export async function startOtp(raw: string): Promise<{ ok: true; devCode?: string }> {
   const login = normalizeLogin(raw);
+  // A suspended account (or one deleted while suspended) can't sign in: say so before sending a code.
+  const banned = await bannedLogin(login);
+  if (banned) {
+    await recordBlockedSignIn(login, (await one<{ id: string }>('SELECT id FROM users WHERE login = $1', [login]))?.id ?? null);
+    throw new AppError(403, 'ACCOUNT_SUSPENDED', banned);
+  }
   await limit(`otp:${login}`, RATE_LIMITS.otpPerHour, 'Too many codes requested. Try again later.');
   // Store reviewers can't receive our emails: their one account uses the fixed code given to Google/Apple.
   const isReview = !!config.REVIEW_EMAIL && !!config.REVIEW_CODE && login === normalizeLogin(config.REVIEW_EMAIL);
@@ -117,6 +124,8 @@ export async function verifyOtp(raw: string, code: string, displayName?: string,
 }
 
 async function signInLogin(login: string, displayName?: string, timezone?: string): Promise<Tokens> {
+  const banned = await bannedLogin(login);
+  if (banned) { await recordBlockedSignIn(login, null); throw new AppError(403, 'ACCOUNT_SUSPENDED', banned); }
   const tz = timezone && isValidTimezone(timezone) ? timezone : undefined;
   const { userId, isNew } = await tx(async (c) => {
     const existing = await one<{ id: string }>('SELECT id FROM users WHERE login = $1', [login], c);

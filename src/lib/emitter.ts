@@ -24,6 +24,10 @@ export const rooms = {
 export function toUser<E extends Ev>(userId: string, event: E, payload: ServiceEvents[E]) {
   emitter.to(rooms.user(userId)).emit(event, payload);
 }
+/** Drops every live connection a user has (used when an account is suspended). */
+export function kickUser(userId: string) {
+  emitter.in(rooms.user(userId)).disconnectSockets(true);
+}
 export function toUsers<E extends Ev>(userIds: string[], event: E, payload: ServiceEvents[E]) {
   if (userIds.length === 0) return;
   emitter.to(userIds.map(rooms.user)).emit(event, payload);
