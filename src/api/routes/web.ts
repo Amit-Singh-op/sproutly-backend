@@ -30,7 +30,7 @@ ${doc.sections.map(([h, b]) => `<h2>${esc(h)}</h2><p>${esc(b)}</p>`).join('\n')}
 
 const DELETE_PAGE = page('Delete your account', `
 <h1>Delete your Sproutly account</h1>
-<p class="muted">This permanently deletes your profile, companion, friends, posts and sessions. Messages you sent are wiped and show as "Message deleted" to others. This can't be undone.</p>
+<p class="muted">This permanently deletes your profile, companion, friends and friend requests, game scores and matches, posts and sessions. Messages you sent are wiped and show as "Message deleted" to others. This can't be undone.</p>
 <p style="margin-top:12px"><b>In the app:</b> Profile → Delete account.<br><b>Here:</b> confirm your email below.</p>
 <p class="muted" style="margin-top:12px">If you subscribed to Sproutly Plus, cancel it in Google Play (Payments &amp; subscriptions) as well; deleting your account doesn't cancel it.</p>
 <p class="muted" style="margin-top:12px">A suspended account can be deleted too. Records of reports and suspensions are kept for up to 2 years for safety (see the <a href="/privacy">Privacy Policy</a>), and a suspended email can't be used to sign up again while the suspension lasts.</p>

@@ -3,7 +3,7 @@
  * Legal screen. Written from what Sproutly actually collects. Review before publishing; not legal advice.
  */
 export const CONTACT_EMAIL = 'sproutlyy.app@gmail.com';
-export const LEGAL_UPDATED = '9 October 2026';
+export const LEGAL_UPDATED = '11 October 2026';
 
 export type LegalDoc = { title: string; intro: string; sections: [heading: string, body: string][] };
 
@@ -18,7 +18,9 @@ export const PRIVACY: LegalDoc = {
       + '• Things you create: chat messages (including stickers, emojis and polls) and poll votes, 24-hour stories (photos or text), Show off posts (photos, captions and the activity you tag), cheers, groups you create or join, friends, and people you block or report.\n'
       + '• Photos: only the ones you choose to upload as your profile photo, a story or a Show off post. We never access your photo library or camera except when you pick or take a photo. Photos are made smaller on your phone before they are uploaded, and photos you view are kept in a temporary cache on your phone so they load faster.\n'
       + '• Activity: whether you are online, and when you have a chat open, so friends can see you in its room. Also who viewed your stories, and chat streaks (whether you and a friend both messaged each other on a given day).\n'
-      + '• Friend updates: when a friend visits your room, signs your guestbook, levels up or reaches a streak milestone, a short note about it is shown to you (and yours to your friends) in the app.\n'
+      + '• Friends and friend requests: who you are friends with, requests you send and receive (and when), and your setting for who can message you (everyone, or friends only).\n'
+      + '• Arcade games: each game you play (which game, when, your score and the coins it earned), your best scores for the week and of all time, and 1 vs 1 matches with friends (who played, the moves in board games, scores and who won). Scores that are impossible for the time played are kept and marked, and are not counted.\n'
+      + '• Friend updates: when a friend visits your room, signs your guestbook, levels up, reaches a streak milestone, sends or accepts a friend request, or challenges you to a game, a short note about it is shown to you (and yours to your friends) in the app.\n'
       + '• App usage: which features you use and when you open the app (for example "opened the shop" or "claimed a daily gift"), with your platform and app version. We use this only to understand and improve Sproutly; it is never sold or used for ads, and no third-party analytics service receives it.\n'
       + '• Device: a push-notification token, your platform (Android/iOS) and app version, so we can send the notifications you have turned on.\n'
       + '• Purchases: if you subscribe to Sproutly Plus, your plan and renewal date. Payment is handled by Google Play or the App Store; we never see your card details.\n'
@@ -27,7 +29,10 @@ export const PRIVACY: LegalDoc = {
     ['How we use it',
       'To run the app: sign you in, deliver your messages, show your companion, stories and posts to the right people, send the notifications you have turned on, apply your subscription, keep the service safe (rate limits, blocking, reports, reviewing reports and suspending accounts that break the rules) and fix bugs. We do not sell your data and we do not show ads.'],
     ['Who can see what',
-      '• Messages: only the people in that chat.\n'
+      '• Messages: only the people in that chat. If you turn on "Only friends can message me", people who are not your friends cannot message you, including in chats you already had with them.\n'
+      + '• Friend requests: only the person you sent one to sees it. A declined request is simply removed; the sender is not told.\n'
+      + '• Arcade leaderboards: other players see your name, companion and best score for each game, on the weekly and all-time boards, among friends and in groups you are in. People you block, and people who block you, do not see each other there.\n'
+      + '• 1 vs 1 matches: only you and the friend you play see the match, its moves and its result, and your record against each other.\n'
       + '• Plaza: while you have the Plaza open, people in the same spot see your companion, your name, where you walk, your emotes and the short lines you say there. People you block never see you, and you never see them.\n'
       + '• Stories, Show off posts and your online status: your friends and people you share a chat with. People you block never see them.\n'
       + '• Your name, username, profile photo, companion and level: people you chat with or who find you in search.\n'
@@ -42,8 +47,9 @@ export const PRIVACY: LegalDoc = {
       + '• Show off posts appear in feeds for 72 hours; you can delete your own at any time.\n'
       + '• Friend updates are kept for 30 days and app usage records for 180 days, then deleted.\n'
       + '• Plaza chat lines are never saved to our database: the last few in each spot are kept for 10 minutes so people arriving can see them, then deleted.\n'
-      + '• Everything else (profile, companion, friends, settings) is kept while your account exists.\n'
-      + '• When you delete your account we delete your profile, companion, friends, posts, stories, sessions and devices, and messages you sent are wiped.\n'
+      + '• Arcade scores, best scores and 1 vs 1 matches are kept while your account exists, so your records and leaderboards stay right.\n'
+      + '• Everything else (profile, companion, friends, friend requests, settings) is kept while your account exists.\n'
+      + '• When you delete your account we delete your profile, companion, friends, friend requests, game scores and matches, posts, stories, sessions and devices, and messages you sent are wiped.\n'
       + '• Moderation records (reports, the copies of reported content, and suspensions) are kept for up to 2 years, including after the account is deleted, so we can keep the community safe and stop banned people from returning. We may keep them longer where the law requires it (for example, to report child exploitation).\n'
       + '• The email address of a suspended account is kept for as long as the suspension lasts, so it cannot be used to sign up again.\n'
       + '• Server logs are kept for up to 30 days. Copies in our providers\' backups expire on their normal schedules.'],
@@ -75,6 +81,7 @@ export const TERMS: LegalDoc = {
     ['Your account', 'You need a valid email address to sign in. Keep access to it safe; anyone with access to your email can sign in as you. You are responsible for activity on your account. You must be at least 13 years old to use Sproutly.'],
     ['Be kind', 'Do not use Sproutly to harass, threaten, spam or impersonate anyone, or to share illegal, hateful, sexual or violent content, in chats, the Plaza, stories, posts or photos. We may remove content and suspend or delete accounts that break these rules. You can block and report people, messages, stories and posts in the app; content reported by several people may be hidden or removed automatically.'],
     ['Suspensions', `An account that several different people report within a short time is suspended automatically while we review it, and we can suspend any account that breaks these terms. A suspended account is signed out straight away, cannot sign in, and its email address cannot be used to create a new account while the suspension lasts. You can still delete a suspended account. If you think a suspension is a mistake, email ${CONTACT_EMAIL} from your account email and we will review it.`],
+    ['Friends and games', 'Adding someone sends them a friend request; you become friends when they accept. You can only challenge friends to 1 vs 1 games, and a challenge expires if it is not answered within 10 minutes. Leaving a game in the middle counts as a loss, and in board games a player who does not move for a day loses. Arcade coins are capped per game and per day, and we may remove scores or coins that were not earned fairly.'],
     ['Fair use', 'Do not use bots, scripts or modified versions of the app, and do not try to get around limits, blocks or suspensions. We limit how often actions can be done; if you reach a limit, wait for the time the app shows.'],
     ['Your content', 'You own what you post, including photos. You give us permission to store it and show it to the people you share it with, only to run the app. Only post photos you have the right to share.'],
     ['Messages and stories are temporary', 'Chat messages are deleted automatically 3 days after they are sent, and stories after 24 hours. Save anything you want to keep.'],
