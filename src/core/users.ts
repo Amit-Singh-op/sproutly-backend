@@ -11,6 +11,7 @@ import { liveCounts } from './live.js';
 import { getEntitlements } from './entitlements.js';
 import { ensureQuests } from './companion.js';
 import { isApproved } from './approval.js';
+import { relations } from './friends.js';
 
 const AVATAR_COLORS = ['#2B2340', '#D9543A', '#7A5AF8', '#2F8A6C', '#3D6FD1', '#A8741A'];
 
@@ -141,8 +142,8 @@ export async function getChatStyle(userId: string): Promise<{ style: ChatStyle; 
 }
 
 export async function getMe(userId: string): Promise<Me> {
-  const u = await one<{ id: string; handle: string; display_name: string; avatar_color: string; avatar_url: string | null; timezone: string; read_receipts: boolean; notifications_enabled: boolean }>(
-    'SELECT id, handle, display_name, avatar_color, avatar_url, timezone, read_receipts, notifications_enabled FROM users WHERE id = $1', [userId],
+  const u = await one<{ id: string; handle: string; display_name: string; avatar_color: string; avatar_url: string | null; timezone: string; read_receipts: boolean; notifications_enabled: boolean; dm_policy: 'everyone' | 'friends' }>(
+    'SELECT id, handle, display_name, avatar_color, avatar_url, timezone, read_receipts, notifications_enabled, dm_policy FROM users WHERE id = $1', [userId],
   );
   if (!u) throw E.unauthorized();
   const [companion, entitlements, style, quests, approved] = await Promise.all([
@@ -150,7 +151,7 @@ export async function getMe(userId: string): Promise<Me> {
   ]);
   return {
     id: u.id, handle: u.handle, displayName: u.display_name, initials: initialsOf(u.display_name), avatarColor: u.avatar_color, avatarUrl: u.avatar_url,
-    timezone: u.timezone, readReceipts: u.read_receipts, notificationsEnabled: u.notifications_enabled, approved, companion, entitlements, chatStyle: style.style, quests,
+    timezone: u.timezone, readReceipts: u.read_receipts, dmPolicy: u.dm_policy ?? 'everyone', notificationsEnabled: u.notifications_enabled, approved, companion, entitlements, chatStyle: style.style, quests,
   };
 }
 
@@ -228,22 +229,6 @@ export async function friends(userId: string): Promise<Person[]> {
   return toPeople(rows);
 }
 
-/** Adding a friend is mutual (the app has no request inbox): both rows become accepted. */
-export async function addFriend(userId: string, friendId: string) {
-  if (userId === friendId) throw E.badRequest("You can't add yourself");
-  if (!(await one('SELECT 1 FROM users WHERE id = $1', [friendId]))) throw E.notFound('User not found');
-  if (await isBlocked(userId, friendId)) throw E.forbidden();
-  await q(
-    `INSERT INTO friendships (user_id, friend_id, status) VALUES ($1,$2,'accepted'), ($2,$1,'accepted')
-     ON CONFLICT (user_id, friend_id) DO UPDATE SET status = 'accepted' WHERE friendships.status <> 'blocked'`,
-    [userId, friendId],
-  );
-  toUsers([userId, friendId], 'social:update', { userId });
-}
-export async function removeFriend(userId: string, friendId: string) {
-  await q(`DELETE FROM friendships WHERE status = 'accepted' AND ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1))`, [userId, friendId]);
-  toUsers([userId, friendId], 'social:update', { userId });
-}
 export async function blockUser(userId: string, targetId: string) {
   if (userId === targetId) throw E.badRequest("You can't block yourself");
   await q(`DELETE FROM friendships WHERE user_id = $2 AND friend_id = $1 AND status = 'accepted'`, [userId, targetId]);
@@ -253,6 +238,11 @@ export async function blockUser(userId: string, targetId: string) {
   );
   // Both sides stop seeing each other's stories and posts right away.
   toUsers([userId, targetId], 'social:update', { userId });
+}
+
+async function withRelations(me: string, people: Person[]): Promise<Person[]> {
+  const rel = await relations(me, people.map((p) => p.id));
+  return people.map((p) => ({ ...p, relation: rel[p.id] ?? 'none' }));
 }
 
 export async function search(userId: string, term: string) {
@@ -270,7 +260,8 @@ export async function search(userId: string, term: string) {
   );
   const live = await liveCounts(groups.map((g) => g.id));
   return {
-    people: await toPeople(people),
+    // Each result says whether you're already friends or a request is waiting, so the app shows the right button.
+    people: await withRelations(userId, await toPeople(people)),
     groups: groups.map((g) => ({
       id: g.id, title: g.title, memberCount: g.member_count, liveCount: live[g.id] ?? 0, capacity: ROOM_LIVE_CAPACITY,
       full: (live[g.id] ?? 0) >= ROOM_LIVE_CAPACITY, plusOnly: g.plus_only, joined: g.joined,

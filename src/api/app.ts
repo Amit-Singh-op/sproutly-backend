@@ -14,6 +14,7 @@ import { authRoutes } from './routes/auth.js';
 import { chatRoutes } from './routes/chat.js';
 import { companionRoutes } from './routes/companion.js';
 import { gameRoutes } from './routes/games.js';
+import { matchRoutes } from './routes/matches.js';
 import { meRoutes } from './routes/me.js';
 import { paymentRoutes } from './routes/payments.js';
 import { socialRoutes } from './routes/social.js';
@@ -105,6 +106,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await authed.register(socialRoutes);
       await authed.register(companionRoutes);
       await authed.register(gameRoutes);
+      await authed.register(matchRoutes);
     });
   }, { prefix: '/v1' });
 

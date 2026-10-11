@@ -27,7 +27,9 @@ export type PushJob =
   | { kind: 'cheer'; postId: string; fromUserId: string }
   | { kind: 'invite'; inviteId: string }
   | { kind: 'level'; userId: string; level: number }
-  | { kind: 'guestbook'; entryId: string };
+  | { kind: 'guestbook'; entryId: string }
+  /** A ready-made notification for one person (friend requests, 1v1 challenges, "your move"). */
+  | { kind: 'social'; userId: string; title: string; body: string; data: Record<string, string> };
 export type QuestJob = { kind: 'message.sent'; messageId: string } | { kind: 'room.visit'; ownerId: string; visitorId: string };
 export type FanoutJob = { postId: string };
 export type EntitlementJob = { userId: string; reason: 'upgrade' | 'downgrade' };

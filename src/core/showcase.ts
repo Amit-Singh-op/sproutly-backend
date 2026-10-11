@@ -43,14 +43,35 @@ async function nextPostAt(userId: string): Promise<string | null> {
   return new Date(recent[0]!.created_at.getTime() + 24 * 3600 * 1000).toISOString();
 }
 
-/** Feed: posts from the last 72 h by you, your friends and people you share a chat with, newest first. */
-export async function feed(userId: string): Promise<{ items: ShowcasePost[]; next: null; nextPostAt: string | null }> {
+/** "<created_at ISO>|<id>": where the next page of the feed starts (strictly older than this post). */
+const feedCursor = (r: PostRow) => `${r.created_at.toISOString()}|${r.id}`;
+
+/**
+ * Feed: posts from the last 72 h by you, your friends and people you share a chat with, newest first, a page at a
+ * time. `before` is the `next` cursor from the previous page. Apps that don't page (older versions) get up to 100.
+ */
+export async function feed(userId: string, opts: { limit?: number; before?: string } = {}): Promise<{ items: ShowcasePost[]; next: string | null; nextPostAt: string | null }> {
+  const lim = Math.min(Math.max(opts.limit ?? 100, 1), 100);
+  const params: unknown[] = [userId];
+  let after = '';
+  const [at, id] = (opts.before ?? '').split('|');
+  if (at && id && !Number.isNaN(Date.parse(at))) {
+    params.push(at, id);
+    after = `AND (p.created_at, p.id) < ($2::timestamptz, $3::uuid)`;
+  }
+  params.push(lim + 1);
   const rows = await q<PostRow>(
     `${POST_SELECT}
-      WHERE NOT p.hidden AND p.created_at > now() - interval '72 hours' AND ${AUDIENCE('p.user_id')}
-      ORDER BY p.created_at DESC LIMIT 100`, [userId],
+      WHERE NOT p.hidden AND p.created_at > now() - interval '72 hours' AND ${AUDIENCE('p.user_id')} ${after}
+      ORDER BY p.created_at DESC, p.id DESC LIMIT $${params.length}`, params,
   );
-  return { items: rows.map(toPost), next: null, nextPostAt: await nextPostAt(userId) };
+  const page = rows.slice(0, lim);
+  return {
+    items: page.map(toPost),
+    next: rows.length > lim ? feedCursor(page[page.length - 1]!) : null,
+    // Only the first page needs this (the app reads it from there).
+    nextPostAt: opts.before ? null : await nextPostAt(userId),
+  };
 }
 
 export async function getPost(userId: string, postId: string): Promise<ShowcasePost> {
@@ -133,9 +154,20 @@ async function commentablePost(userId: string, postId: string) {
   return post;
 }
 
-export async function listComments(userId: string, postId: string): Promise<ShowcaseComment[]> {
+export async function listComments(userId: string, postId: string, opts: { limit?: number; before?: string } = {}): Promise<ShowcaseComment[]> {
   await commentablePost(userId, postId);
-  const rows = await q<CommentRow>(`${COMMENT_SELECT} WHERE c.post_id = $2 AND ${NOT_BLOCKED} ORDER BY c.created_at ASC LIMIT 200`, [userId, postId]);
+  // Paged from the newest: the latest `limit` comments before `before` (oldest first, as the sheet shows them).
+  // Without `limit` (older app versions) it's the first 200, oldest first, as before.
+  let rows: CommentRow[];
+  if (opts.limit) {
+    const lim = Math.min(Math.max(opts.limit, 1), 100);
+    const cursor = opts.before && !Number.isNaN(Date.parse(opts.before)) ? opts.before : null;
+    rows = (await q<CommentRow>(
+      `${COMMENT_SELECT} WHERE c.post_id = $2 AND ${NOT_BLOCKED} ${cursor ? 'AND c.created_at < $4::timestamptz' : ''}
+        ORDER BY c.created_at DESC LIMIT $3`, cursor ? [userId, postId, lim, cursor] : [userId, postId, lim])).reverse();
+  } else {
+    rows = await q<CommentRow>(`${COMMENT_SELECT} WHERE c.post_id = $2 AND ${NOT_BLOCKED} ORDER BY c.created_at ASC LIMIT 200`, [userId, postId]);
+  }
   return rows.map(toComment);
 }
 

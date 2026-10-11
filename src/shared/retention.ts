@@ -164,6 +164,10 @@ export function activityText(kind: ActivityKind, actorName: string, data: Record
     case 'streak_milestone': return `${actorName} hit a ${n('day')}-day streak 🔥`;
     case 'friend_streak': return `You and ${actorName} are on a ${n('count')}-day chat streak 🔥`;
     case 'egg_hatched': return `${actorName}'s egg hatched 🐣`;
+    case 'friend_request': return `${actorName} sent you a friend request`;
+    case 'friend_accept': return `${actorName} accepted your friend request`;
+    case 'match_invite': return `${actorName} challenged you to ${typeof data.gameName === 'string' ? data.gameName : 'a game'}`;
+    case 'match_result': return data.result === 'win' ? `${actorName} beat you at ${String(data.gameName ?? 'a game')}` : data.result === 'draw' ? `You and ${actorName} drew at ${String(data.gameName ?? 'a game')}` : `You beat ${actorName} at ${String(data.gameName ?? 'a game')}`;
   }
 }
 

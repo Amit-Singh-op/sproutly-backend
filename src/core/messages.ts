@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { dmBlockedReason } from './friends.js';
+import { AppError } from '../lib/errors.js';
 import type pg from 'pg';
 import { v7 as uuidv7 } from 'uuid';
 import { z } from 'zod';
@@ -135,6 +137,13 @@ export async function sendMessage(userId: string, input: SendBody): Promise<Mess
     one<{ display_name: string }>('SELECT display_name FROM users WHERE id = $1', [userId]),
   ]);
   if (dupe) return (await toMessages([dupe], userId))[0]!;
+
+  // Private chats: blocks, and people who only take messages from friends.
+  if (conv?.kind === 'dm') {
+    const other = await one<{ user_id: string }>('SELECT user_id FROM conversation_members WHERE conversation_id = $1 AND user_id <> $2', [input.conversationId, userId]);
+    const why = other ? await dmBlockedReason(userId, other.user_id) : null;
+    if (why) throw new AppError(403, 'DM_FRIENDS_ONLY', why);
+  }
 
   // Step 4: rate limits.
   await limit(`msg:u:${userId}`, RATE_LIMITS.msgPerUser, 'You’re sending messages too fast');

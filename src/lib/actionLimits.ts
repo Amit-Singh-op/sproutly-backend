@@ -50,6 +50,13 @@ const ACTIONS: Record<string, Rule> = {
   'POST /v1/games/:game/start': { points: 120, windowS: HOUR, message: "You've played a lot of games this hour. Give Mo a little break." },
   'POST /v1/games/sessions/:id/finish': { points: 120, windowS: HOUR, message: "You've played a lot of games this hour. Give Mo a little break." },
   'GET /v1/games/:game/leaderboard': { points: 120, windowS: MIN, message: 'Slow down a little.' },
+  'POST /v1/friends/:id/accept': { points: 60, windowS: HOUR, message: "You've accepted a lot of requests recently." },
+  'POST /v1/friends/:id/decline': { points: 60, windowS: HOUR, message: "You've declined a lot of requests recently." },
+  'POST /v1/matches': { points: 30, windowS: HOUR, message: "You've sent a lot of challenges. Give your friends a moment." },
+  'POST /v1/matches/:id/respond': { points: 60, windowS: HOUR, message: 'Slow down a little.' },
+  'POST /v1/matches/:id/move': { points: 60, windowS: MIN, message: "You're moving too fast." },
+  'POST /v1/matches/:id/progress': { points: 150, windowS: MIN, message: 'Slow down a little.' },
+  'POST /v1/matches/:id/finish': { points: 20, windowS: MIN, message: 'Slow down a little.' },
   'POST /v1/purchases/sync': { points: 10, windowS: MIN, message: 'Slow down a little.' },
 };
 

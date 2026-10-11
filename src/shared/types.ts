@@ -355,6 +355,8 @@ export interface Me {
   avatarUrl?: string | null;
   timezone: string;
   readReceipts: boolean;
+  /** Who can message you privately. */
+  dmPolicy: 'everyone' | 'friends';
   /** Settings → Notifications (push). Only private chats and @mentions in groups ever notify. */
   notificationsEnabled?: boolean;
   /** Invite-only: false until an admin approves the account (the app shows the waitlist screen). */
@@ -388,12 +390,48 @@ export interface ConversationDetail {
   otherLastSeenAt: string | null;
   plusOnly: boolean;
   readOnly: boolean;
+  /** Private chat you can't send in (they only take messages from friends, or a block): why, to show instead of the composer. */
+  sendBlocked?: string | null;
   myReadSeq: number;
   avatarUrl?: string | null;
   members?: ConversationMemberInfo[];
 }
 
-export interface Person { id: UUID; displayName: string; handle: string; avatarColor: string; avatarUrl?: string | null; initials: string; online?: boolean }
+/** How you and someone else are connected: friends, a request either way, blocked, or nothing yet. */
+export type FriendRelation = 'self' | 'friends' | 'outgoing' | 'incoming' | 'blocked' | 'none';
+export interface Person { id: UUID; displayName: string; handle: string; avatarColor: string; avatarUrl?: string | null; initials: string; online?: boolean; relation?: FriendRelation }
+export interface FriendRequests { incoming: (Person & { requestedAt: string })[]; outgoing: (Person & { requestedAt: string })[] }
+
+// ---------------- 1v1 matches ----------------
+export type MatchStatus = 'invited' | 'active' | 'done' | 'declined' | 'cancelled' | 'expired';
+export interface MatchPlayer { id: UUID; displayName: string; initials: string; avatarColor: string; avatarUrl: string | null; palette: PaletteId; level: number; outfit: Outfit; equippedSlots: EquippedSlots }
+export interface Match {
+  id: UUID;
+  game: string;
+  kind: 'race' | 'turn';
+  status: MatchStatus;
+  /** a = who challenged, b = who was challenged. */
+  a: MatchPlayer;
+  b: MatchPlayer;
+  /** 1 if you're a, 2 if you're b. */
+  you: 1 | 2;
+  aScore: number | null;
+  bScore: number | null;
+  /** On a finished match: the winner's id, or null for a draw. */
+  winnerId: UUID | null;
+  /** Turn games: whose move it is. */
+  turnId: UUID | null;
+  endReason: 'forfeit' | 'timeout' | null;
+  /** Races: when both start playing (server time). */
+  startsAt: string | null;
+  /** Invites: when an unanswered invite lapses. */
+  expiresAt: string | null;
+  state: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+/** A friend in the Arcade: online or not, and your head-to-head record. */
+export interface ArcadeFriend extends Person { wins: number; losses: number; draws: number }
 
 export type SendInput =
   | { clientId: UUID; conversationId: UUID; type: 'text'; body: string }
@@ -564,6 +602,12 @@ export interface ServiceEvents {
   'stories:update': { userId: UUID };
   /** Your friends or blocks changed (you or the other person): reload stories and the Show off feed. */
   'social:update': { userId: UUID };
+  /** A friend request was sent, accepted, declined or cancelled, or someone was unfriended. */
+  'friends:update': { userId: UUID };
+  /** A 1v1 match changed (invite, accept, move, result): the full match as this person may see it. */
+  'match:update': Match;
+  /** Live race: the other player's score so far. */
+  'match:score': { matchId: UUID; userId: UUID; score: number };
   /** Your room invites changed (a new one for you, or one you sent was answered): reload them. */
   'invites:update': Record<string, never>;
   /** You opened a group chat that's at its at-once limit: you can read it and you're let in when a seat frees up. */
@@ -595,7 +639,7 @@ export interface FriendStreak {
   theyToday: boolean;
 }
 
-export const ACTIVITY_KINDS = ['guestbook', 'room_visit', 'level_up', 'streak_milestone', 'friend_streak', 'egg_hatched'] as const;
+export const ACTIVITY_KINDS = ['guestbook', 'room_visit', 'level_up', 'streak_milestone', 'friend_streak', 'egg_hatched', 'friend_request', 'friend_accept', 'match_invite', 'match_result'] as const;
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 export interface ActivityItem {
   id: UUID;

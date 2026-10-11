@@ -107,6 +107,10 @@ export async function handlePush(job: PushJob) {
     await notifyFriends(job.userId, 'level_up', { level: job.level }, `level:${job.userId}:${job.level}`);
     return;
   }
+  if (job.kind === 'social') {
+    await sendToUser(job.userId, { title: job.title, body: job.body, channel: 'general', data: job.data });
+    return;
+  }
   if (job.kind === 'cheer' || job.kind === 'invite' || job.kind === 'guestbook') return;
 }
 

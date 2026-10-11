@@ -16,6 +16,7 @@ const PatchMe = z.object({
   displayName: z.string().trim().min(1).max(40).optional(),
   timezone: z.string().refine(isValidTimezone, 'Unknown timezone').optional(),
   readReceipts: z.boolean().optional(),
+  dmPolicy: z.enum(['everyone', 'friends']).optional(),
   notificationsEnabled: z.boolean().optional(),
   avatarUrl: z.string().url().max(500).nullable().optional(),
 });
@@ -32,6 +33,7 @@ export async function meRoutes(app: FastifyInstance) {
     if (p.displayName !== undefined) { vals.push(p.displayName); sets.push(`display_name = $${vals.length}`); }
     if (p.timezone !== undefined) { vals.push(p.timezone); sets.push(`timezone = $${vals.length}`); }
     if (p.readReceipts !== undefined) { vals.push(p.readReceipts); sets.push(`read_receipts = $${vals.length}`); }
+    if (p.dmPolicy !== undefined) { vals.push(p.dmPolicy); sets.push(`dm_policy = $${vals.length}`); }
     if (p.notificationsEnabled !== undefined) { vals.push(p.notificationsEnabled); sets.push(`notifications_enabled = $${vals.length}`); }
     if (p.avatarUrl !== undefined) {
       if (p.avatarUrl !== null && !isOwnCloudinaryUrl(p.avatarUrl, req.userId)) throw E.badRequest('Upload the photo first, then save it.');

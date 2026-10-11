@@ -1,4 +1,5 @@
 import { one, q, tx, type Db } from '../db/pool.js';
+import { dmBlockedReason } from './friends.js';
 import { rooms, toRoom, toUser, toUsers } from '../lib/emitter.js';
 import { AppError, E } from '../lib/errors.js';
 import { isOnline, onlineMap } from '../lib/presence.js';
@@ -149,7 +150,10 @@ export async function conversationDetail(userId: string, id: string): Promise<Co
   const online = await onlineMap(members.map((x) => x.user_id));
   const title = c.kind === 'dm' ? other?.display_name ?? 'Chat' : c.title ?? 'Group';
   const blocked = other ? await isBlocked(userId, other.user_id) : false;
+  // Private chat with someone who only takes messages from friends (and you aren't): you can read, not send.
+  const sendBlocked = other ? await dmBlockedReason(userId, other.user_id) : null;
   return {
+    sendBlocked,
     id: c.id,
     kind: c.kind,
     title,
@@ -196,6 +200,11 @@ export async function openDm(userId: string, otherId: string): Promise<Conversat
   if (!(await one('SELECT 1 FROM users WHERE id = $1', [otherId]))) throw E.notFound('User not found');
   if (await isBlocked(userId, otherId)) throw E.forbidden('You can’t message this person');
   const key = [userId, otherId].sort().join(':');
+  // A chat you already have still opens (you can read it); starting a new one follows their message setting.
+  if (!(await one('SELECT 1 FROM conversations WHERE dm_key = $1', [key]))) {
+    const why = await dmBlockedReason(userId, otherId);
+    if (why) throw new AppError(403, 'DM_FRIENDS_ONLY', why);
+  }
   const id = await tx(async (c) => {
     const existing = await one<{ id: string }>('SELECT id FROM conversations WHERE dm_key = $1', [key], c);
     if (existing) {

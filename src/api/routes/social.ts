@@ -8,7 +8,8 @@ import { COMMENT_MAX, GUESTBOOK_STICKERS, SHOWCASE_ACTIVITIES } from '../../shar
 import { LIMITS } from '../../shared/rules.js';
 import { addComment, cheer, createPost, deleteComment, deletePost, feed, getPost, listComments } from '../../core/showcase.js';
 import { NewStoryBody, createStory, deleteStory, listStories, viewStory } from '../../core/stories.js';
-import { addFriend, blockUser, friends, removeFriend, search } from '../../core/users.js';
+import { blockUser, friends, search } from '../../core/users.js';
+import { acceptFriend, declineFriend, friendRequests, relation, removeFriendOrRequest, requestFriend } from '../../core/friends.js';
 import { listActivity, markActivitySeen } from '../../core/activity.js';
 import { plazaSpots } from '../../realtime/plaza.js';
 
@@ -17,8 +18,13 @@ const UserId = z.object({ userId: z.string().uuid() });
 
 export async function socialRoutes(app: FastifyInstance) {
   app.get('/friends', async (req) => friends(req.userId));
-  app.post('/friends/:id', async (req) => { await addFriend(req.userId, Id.parse(req.params).id); return { ok: true }; });
-  app.delete('/friends/:id', async (req) => { await removeFriend(req.userId, Id.parse(req.params).id); return { ok: true }; });
+  // Friend requests: add sends one (or accepts theirs); accept/decline answer one; delete unfriends or cancels yours.
+  app.get('/friends/requests', async (req) => friendRequests(req.userId));
+  app.get('/users/:id/relation', async (req) => ({ relation: await relation(req.userId, Id.parse(req.params).id) }));
+  app.post('/friends/:id', async (req) => ({ relation: await requestFriend(req.userId, Id.parse(req.params).id) }));
+  app.post('/friends/:id/accept', async (req) => ({ relation: await acceptFriend(req.userId, Id.parse(req.params).id) }));
+  app.post('/friends/:id/decline', async (req) => { await declineFriend(req.userId, Id.parse(req.params).id); return { relation: 'none' }; });
+  app.delete('/friends/:id', async (req) => { await removeFriendOrRequest(req.userId, Id.parse(req.params).id); return { relation: 'none' }; });
   app.post('/users/:id/block', async (req) => { await blockUser(req.userId, Id.parse(req.params).id); return { ok: true }; });
 
   app.get('/search', async (req) => {
@@ -29,7 +35,10 @@ export async function socialRoutes(app: FastifyInstance) {
   app.get('/events/current', async () => currentEvent());
 
   // Showcase
-  app.get('/showcase/feed', async (req) => feed(req.userId));
+  app.get('/showcase/feed', async (req) => {
+    const p = z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), before: z.string().max(80).optional() }).parse(req.query);
+    return feed(req.userId, p);
+  });
   app.get('/showcase/posts/:id', async (req) => getPost(req.userId, Id.parse(req.params).id));
   app.post('/showcase/posts', async (req) => {
     const b = z.object({
@@ -40,7 +49,10 @@ export async function socialRoutes(app: FastifyInstance) {
     }).parse(req.body);
     return createPost(req.userId, b.caption, b.imageUrl, b.activity, b.kind);
   });
-  app.get('/showcase/posts/:id/comments', async (req) => listComments(req.userId, Id.parse(req.params).id));
+  app.get('/showcase/posts/:id/comments', async (req) => {
+    const p = z.object({ limit: z.coerce.number().int().min(1).max(100).optional(), before: z.string().max(40).optional() }).parse(req.query);
+    return listComments(req.userId, Id.parse(req.params).id, p);
+  });
   app.post('/showcase/posts/:id/comments', async (req) => {
     const { body } = z.object({ body: z.string().min(1).max(COMMENT_MAX * 2) }).parse(req.body);
     return addComment(req.userId, Id.parse(req.params).id, body);
