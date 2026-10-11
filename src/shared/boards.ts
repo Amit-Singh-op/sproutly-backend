@@ -5,7 +5,7 @@
  *
  * Players are 1 (the challenger, "a") and 2 (the friend who was challenged, "b").
  */
-export const RACE_GAMES = ['catch', 'hop', 'stack', 'whack', 'memory', 'simon'] as const;
+export const RACE_GAMES = ['catch', 'hop', 'stack', 'whack', 'memory', 'simon', 'cricket'] as const;
 export const TURN_GAMES = ['ttt', 'c4', 'rps'] as const;
 export type RaceGame = (typeof RACE_GAMES)[number];
 export type TurnGame = (typeof TURN_GAMES)[number];

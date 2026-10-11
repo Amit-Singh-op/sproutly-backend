@@ -2,7 +2,7 @@
  * Minigames: the list, how scores turn into coins, and the most a real player could score in a given time (the server
  * rejects anything above it). Mirrored in the app at src/games/rules.ts; keep the two in sync.
  */
-export const GAME_IDS = ['catch', 'hop', 'memory', 'whack', 'simon', 'stack'] as const;
+export const GAME_IDS = ['catch', 'hop', 'memory', 'whack', 'simon', 'stack', 'cricket'] as const;
 export type GameId = (typeof GAME_IDS)[number];
 
 export interface GameDef {
@@ -31,6 +31,9 @@ export const GAMES: Record<GameId, GameDef> = {
     maxScore: (s) => Math.floor(Math.sqrt(s / 0.25)) + 2 },
   stack: { id: 'stack', name: 'Sky Stack', blurb: 'Drop the blocks and build the tallest tower.', pointsPerCoin: 1.5, maxCoinsPerRun: 25, minSeconds: 1,
     maxScore: (s) => Math.floor(s / 0.45) + 2 },
+  // Runs in 2 overs: at most a six a ball (72) plus a few wides, and every ball takes at least ~2.5s.
+  cricket: { id: 'cricket', name: 'Cricket', blurb: 'Bat 2 overs and score as many runs as you can.', pointsPerCoin: 3, maxCoinsPerRun: 25, minSeconds: 6,
+    maxScore: (s) => Math.min(90, Math.ceil(s * 3) + 6) },
 };
 
 /** Coins all games together can pay in one day (local day of the player). */
