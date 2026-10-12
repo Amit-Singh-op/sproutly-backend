@@ -108,7 +108,8 @@ export async function handlePush(job: PushJob) {
     return;
   }
   if (job.kind === 'social') {
-    await sendToUser(job.userId, { title: job.title, body: job.body, channel: 'general', data: job.data });
+    // Everything about one 1v1 match shares a thread, so a new 'Your move!' replaces the last one instead of stacking.
+    await sendToUser(job.userId, { title: job.title, body: job.body, channel: 'general', data: job.data, threadId: job.data.matchId ? `match:${job.data.matchId}` : undefined });
     return;
   }
   if (job.kind === 'cheer' || job.kind === 'invite' || job.kind === 'guestbook') return;
