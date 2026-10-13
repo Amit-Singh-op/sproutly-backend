@@ -26,6 +26,13 @@ async function getJson(url: string): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
 
+/** A provider's public song page (only ever the fixed music hosts providerOf allows). */
+async function getHtml(url: string): Promise<string> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { accept: 'text/html', 'user-agent': 'Mozilla/5.0 (compatible; SproutlyBot/1.0)' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.text()).slice(0, 300_000);
+}
+
 const metaContent = (html: string, prop: string) =>
   html.match(new RegExp(`<meta[^>]+property=["']${prop}["'][^>]+content=["']([^"']*)["']`, 'i'))?.[1]
   ?? html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+property=["']${prop}["']`, 'i'))?.[1];
@@ -40,9 +47,17 @@ export async function songFromLink(link: string): Promise<SongCard> {
   let title: string | null = null, artist: string | null = null, art: unknown = null;
   try {
     if (provider === 'spotify') {
-      const j = await getJson(`https://open.spotify.com/oembed?url=${encodeURIComponent(canonical)}`);
-      title = clip(j.title as string, 120);
-      art = j.thumbnail_url;
+      // The track page has the artist (oEmbed only has the title); oEmbed stays as the fallback.
+      const html = await getHtml(canonical).catch(() => '');
+      const artists = [...html.matchAll(/<meta[^>]+name=["']music:musician_description["'][^>]+content=["']([^"']*)["']/gi)].map((m) => unescapeHtml(m[1]!));
+      title = clip(unescapeHtml(metaContent(html, 'og:title') ?? ''), 120);
+      artist = clip(artists.join(', '), 80);
+      art = metaContent(html, 'og:image');
+      if (!title) {
+        const j = await getJson(`https://open.spotify.com/oembed?url=${encodeURIComponent(canonical)}`);
+        title = clip(j.title as string, 120);
+        art = j.thumbnail_url;
+      }
     } else if (provider === 'youtube') {
       // YouTube Music links work with YouTube's oEmbed once pointed at www.youtube.com.
       const v = url.hostname === 'youtu.be' ? url.pathname.slice(1) : url.searchParams.get('v');
@@ -58,9 +73,7 @@ export async function songFromLink(link: string): Promise<SongCard> {
       title = clip(artist && raw.endsWith(` by ${artist}`) ? raw.slice(0, -` by ${artist}`.length) : raw, 120);
       art = j.thumbnail_url;
     } else {
-      const res = await fetch(canonical, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { accept: 'text/html', 'user-agent': 'Mozilla/5.0 (compatible; SproutlyBot/1.0)' } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const html = (await res.text()).slice(0, 300_000);
+      const html = await getHtml(canonical);
       // "‎Song Name - Song by Artist - Apple Music" (also "Album by Artist on Apple Music")
       const og = unescapeHtml(metaContent(html, 'og:title') ?? '').replace(/^‎/, '').replace(/\s+(-|on)\s+Apple Music$/i, '');
       const m = og.match(/^(.*?)\s+-\s+(?:Song|Single|EP|Album)\s+by\s+(.*)$/i) ?? og.match(/^(.*?)\s+by\s+(.*)$/i);
@@ -80,7 +93,7 @@ export async function songFromLink(link: string): Promise<SongCard> {
 export async function songCached(link: string): Promise<SongCard | null> {
   const found = providerOf(link);
   if (!found) return null;
-  const key = `song:${songKey(link)}`;
+  const key = `song2:${songKey(link)}`; // v2: Spotify cards carry the artist
   try {
     const hit = await redis.get(key);
     if (hit) return hit === '-' ? null : (JSON.parse(hit) as SongCard);
@@ -94,7 +107,25 @@ export async function songCached(link: string): Promise<SongCard | null> {
 
 /** The songs on someone's profile, newest first. */
 export async function songsOfUser(userId: string): Promise<SongCard[]> {
-  return (await one<{ songs: SongCard[] }>('SELECT songs FROM user_music WHERE user_id = $1', [userId]))?.songs ?? [];
+  const songs = (await one<{ songs: SongCard[] }>('SELECT songs FROM user_music WHERE user_id = $1', [userId]))?.songs ?? [];
+  if (songs.some((s) => s.provider === 'spotify' && !s.artist)) void fillArtists(userId, songs).catch(() => {});
+  return songs;
+}
+
+/** Spotify songs saved before cards carried the artist: look them up again in the background and save once. */
+const filling = new Set<string>();
+async function fillArtists(userId: string, songs: SongCard[]) {
+  if (filling.has(userId)) return;
+  filling.add(userId);
+  try {
+    const next = await Promise.all(songs.map(async (s) => (s.provider === 'spotify' && !s.artist ? (await songCached(s.url)) ?? s : s)));
+    if (next.some((s, i) => s.artist !== songs[i]!.artist)) {
+      await q('UPDATE user_music SET songs = $2, updated_at = now() WHERE user_id = $1', [userId, JSON.stringify(next)]);
+      await tell(userId, next);
+    }
+  } finally {
+    filling.delete(userId);
+  }
 }
 
 /** The newest song of many people at once (the friends list). People without one are left out. */
