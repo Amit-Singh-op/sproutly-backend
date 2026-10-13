@@ -8,7 +8,7 @@ import { COMMENT_MAX, GUESTBOOK_STICKERS, SHOWCASE_ACTIVITIES } from '../../shar
 import { LIMITS } from '../../shared/rules.js';
 import { addComment, cheer, createPost, deleteComment, deletePost, feed, getPost, listComments } from '../../core/showcase.js';
 import { NewStoryBody, createStory, deleteStory, listStories, viewStory } from '../../core/stories.js';
-import { blockUser, friends, search } from '../../core/users.js';
+import { blockUser, friends, profile, search } from '../../core/users.js';
 import { acceptFriend, declineFriend, friendRequests, relation, removeFriendOrRequest, requestFriend } from '../../core/friends.js';
 import { listActivity, markActivitySeen } from '../../core/activity.js';
 import { plazaSpots } from '../../realtime/plaza.js';
@@ -20,6 +20,7 @@ export async function socialRoutes(app: FastifyInstance) {
   app.get('/friends', async (req) => friends(req.userId));
   // Friend requests: add sends one (or accepts theirs); accept/decline answer one; delete unfriends or cancels yours.
   app.get('/friends/requests', async (req) => friendRequests(req.userId));
+  app.get('/users/:id/profile', async (req) => profile(req.userId, Id.parse(req.params).id));
   app.get('/users/:id/relation', async (req) => ({ relation: await relation(req.userId, Id.parse(req.params).id) }));
   app.post('/friends/:id', async (req) => ({ relation: await requestFriend(req.userId, Id.parse(req.params).id) }));
   app.post('/friends/:id/accept', async (req) => ({ relation: await acceptFriend(req.userId, Id.parse(req.params).id) }));

@@ -16,6 +16,8 @@ import { slotsOf } from './users.js';
 import { isPlus } from './entitlements.js';
 import { memberIds, requireMember, summaryFor } from './conversations.js';
 import { requireLiveSeat } from './live.js';
+import { songCached } from './music.js';
+import { songKey, songLinkIn } from '../shared/music.js';
 
 // ---------------- validation (doc 6.2 step 2) ----------------
 const Text = z.string().transform(cleanText).pipe(z.string().min(1, 'Message is empty').max(LIMITS.textMax, 'Message is too long'));
@@ -164,6 +166,10 @@ export async function sendMessage(userId: string, input: SendBody): Promise<Mess
     payload = { question: input.payload.question, options: input.payload.options };
   } else {
     body = input.body;
+    // A song link from a music app: attach its card (title, artist, cover). Capped so a slow music service never
+    // holds a message up; it just goes out as plain text then.
+    const link = songLinkIn(body);
+    if (link) payload = await Promise.race([songCached(link), new Promise<null>((r) => setTimeout(() => r(null), 2500))]).catch(() => null);
   }
 
   const row = await tx(async (c) => {
@@ -281,8 +287,13 @@ export async function editMessage(userId: string, messageId: string, rawBody: st
   if (m.type !== 'text') throw E.badRequest('Only text messages can be edited');
   if (Date.now() - m.created_at.getTime() > LIMITS.editWindowMs) throw E.conflict('Messages can only be edited for 15 minutes');
   const body = Text.parse(rawBody);
-  const r = await one<{ edited_at: Date }>('UPDATE messages SET body = $2, edited_at = now() WHERE id = $1 RETURNING edited_at', [messageId, body]);
-  toUsers(await memberIds(m.conversation_id), 'msg:update', { id: m.id, conversationId: m.conversation_id, body, editedAt: r!.edited_at.toISOString() });
+  // A song card stays only while its link is still in the text.
+  const card = m.payload as { url?: string } | null;
+  const stillThere = songLinkIn(body);
+  const dropCard = !!card?.url && (!stillThere || songKey(stillThere) !== card.url);
+  const r = await one<{ edited_at: Date }>(
+    `UPDATE messages SET body = $2, edited_at = now()${dropCard ? ', payload = NULL' : ''} WHERE id = $1 RETURNING edited_at`, [messageId, body]);
+  toUsers(await memberIds(m.conversation_id), 'msg:update', { id: m.id, conversationId: m.conversation_id, body, editedAt: r!.edited_at.toISOString(), ...(dropCard ? { payload: null } : {}) });
 }
 
 export async function deleteMessage(userId: string, messageId: string) {

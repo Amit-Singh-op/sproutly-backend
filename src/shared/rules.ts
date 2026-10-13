@@ -146,8 +146,12 @@ export function previewFor(m: Pick<Message, 'type' | 'body' | 'payload' | 'delet
       break;
     case 'system':
       return (m.payload as { text?: string } | null)?.text ?? '';
-    default:
+    default: {
       text = m.body ?? '';
+      // Just a song link: show the song, not the URL.
+      const song = m.payload as { url?: string; title?: string } | null;
+      if (song?.title && song.url && !/\s/.test(text.trim())) text = `🎵 ${song.title}`;
+    }
   }
   if (opts.mine) return `You: ${text}`;
   return opts.isGroup ? `${who}: ${text}` : text;

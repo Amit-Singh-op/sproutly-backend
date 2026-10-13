@@ -3,7 +3,7 @@
  * Legal screen. Written from what Sproutly actually collects. Review before publishing; not legal advice.
  */
 export const CONTACT_EMAIL = 'sproutlyy.app@gmail.com';
-export const LEGAL_UPDATED = '11 October 2026';
+export const LEGAL_UPDATED = '13 October 2026';
 
 export type LegalDoc = { title: string; intro: string; sections: [heading: string, body: string][] };
 
@@ -12,7 +12,7 @@ export const PRIVACY: LegalDoc = {
   intro: `This policy explains what Sproutly ("we", "us") collects when you use the Sproutly app, why, how long we keep it, and the choices you have. Questions: ${CONTACT_EMAIL}.`,
   sections: [
     ['What we collect',
-      '• Account: your email address (to sign you in with a one-time code), display name, username, avatar colour, optional profile photo, and your time zone (for daily quests and streaks).\n'
+      '• Account: your email address (to sign you in with a one-time code), display name, username, avatar colour, optional profile photo and bio, and your time zone (for daily quests and streaks).\n'
       + '• Your companion: its name, level, energy, coins, the clothes and items you own and what it is wearing, up to three saved looks, moves, streak and streak shields, eggs, room settings and chat-style choices, and when you last looked after it.\n'
       + '• Wardrobe purchases: which items you bought with coins and when. Coins are earned in the app and cannot be bought with money.\n'
       + '• Things you create: chat messages (including stickers, emojis and polls) and poll votes, 24-hour stories (photos or text), Show off posts (photos, captions and the activity you tag), cheers, groups you create or join, friends, and people you block or report.\n'
@@ -20,6 +20,7 @@ export const PRIVACY: LegalDoc = {
       + '• Activity: whether you are online, and when you have a chat open, so friends can see you in its room. Also who viewed your stories, and chat streaks (whether you and a friend both messaged each other on a given day).\n'
       + '• Friends and friend requests: who you are friends with, requests you send and receive (and when), and your setting for who can message you (everyone, or friends only).\n'
       + '• Arcade games: each game you play (which game, when, your score and the coins it earned), your best scores for the week and of all time, and 1 vs 1 matches with friends (who played, the moves in board games, scores and who won). Scores that are impossible for the time played are kept and marked, and are not counted.\n'
+      + '• Songs: if you add a song to your profile, its link from a music app (Spotify, YouTube, Apple Music or SoundCloud) with its title, artist and cover. When you send a song link in a chat, we look up the same details and show them as a card in that chat.\n'
       + '• Friend updates: when a friend visits your room, signs your guestbook, levels up, reaches a streak milestone, sends or accepts a friend request, or challenges you to a game, a short note about it is shown to you (and yours to your friends) in the app.\n'
       + '• App usage: which features you use and when you open the app (for example "opened the shop" or "claimed a daily gift"), with your platform and app version. We use this only to understand and improve Sproutly; it is never sold or used for ads, and no third-party analytics service receives it.\n'
       + '• Device: a push-notification token, your platform (Android/iOS) and app version, so we can send the notifications you have turned on.\n'
@@ -34,13 +35,14 @@ export const PRIVACY: LegalDoc = {
       + '• Arcade leaderboards: other players see your name, companion and best score for each game, on the weekly and all-time boards, among friends and in groups you are in. People you block, and people who block you, do not see each other there.\n'
       + '• 1 vs 1 matches: only you and the friend you play see the match, its moves and its result, and your record against each other.\n'
       + '• Plaza: while you have the Plaza open, people in the same spot see your companion, your name, where you walk, your emotes and the short lines you say there. People you block never see you, and you never see them.\n'
+      + '• The song on your profile: only your friends (on your profile and in their friends list). A song card in a chat is seen by the people in that chat, like any message.\n'
       + '• Stories, Show off posts and your online status: your friends and people you share a chat with. People you block never see them.\n'
-      + '• Your name, username, profile photo, companion and level: people you chat with or who find you in search.\n'
+      + '• Your profile (name, username, profile photo, bio, companion, level, growth stage, current streak, and whether you have Plus): people you chat with or who find you in search. Your coins, shields and settings are never shown to others.\n'
       + '• When you have a chat open, the others in it see your companion in its room.\n'
       + '• Groups: anyone browsing groups sees each group\'s member count and how many people are in its chat right now (a number, not who). Groups have no member limit; up to 25 people can be in a group chat at the same time.\n'
       + '• Updates are live: new stories, Show off posts, cheers, comments and who is online reach the people allowed to see them as they happen.'],
     ['Who we share it with',
-      'Only with services that run Sproutly for us, under their own privacy terms: Render (servers and live data such as who is online), Neon (database), Cloudinary (storing and delivering the photos you upload), Resend (sign-in code emails), Google Firebase Cloud Messaging (push notifications), RevenueCat and Google Play / Apple App Store (subscriptions). We may disclose information if required by law.'],
+      'Only with services that run Sproutly for us, under their own privacy terms: Render (servers and live data such as who is online), Neon (database), Cloudinary (storing and delivering the photos you upload), Resend (sign-in code emails), Google Firebase Cloud Messaging (push notifications), RevenueCat and Google Play / Apple App Store (subscriptions). When you add or send a song link, the music service it is from (to look up its title and cover). We may disclose information if required by law.'],
     ['How long we keep it',
       '• Chat messages are deleted automatically 3 days after they are sent, in every chat.\n'
       + '• Stories disappear after 24 hours and are then deleted.\n'
@@ -48,8 +50,9 @@ export const PRIVACY: LegalDoc = {
       + '• Friend updates are kept for 30 days and app usage records for 180 days, then deleted.\n'
       + '• Plaza chat lines are never saved to our database: the last few in each spot are kept for 10 minutes so people arriving can see them, then deleted.\n'
       + '• Arcade scores, best scores and 1 vs 1 matches are kept while your account exists, so your records and leaderboards stay right.\n'
+      + '• The song on your profile is kept until you remove or change it, or delete your account. Song cards in chats are deleted with their message.\n'
       + '• Everything else (profile, companion, friends, friend requests, settings) is kept while your account exists.\n'
-      + '• When you delete your account we delete your profile, companion, friends, friend requests, game scores and matches, posts, stories, sessions and devices, and messages you sent are wiped.\n'
+      + '• When you delete your account we delete your profile, companion, music, friends, friend requests, game scores and matches, posts, stories, sessions and devices, and messages you sent are wiped.\n'
       + '• Moderation records (reports, the copies of reported content, and suspensions) are kept for up to 2 years, including after the account is deleted, so we can keep the community safe and stop banned people from returning. We may keep them longer where the law requires it (for example, to report child exploitation).\n'
       + '• The email address of a suspended account is kept for as long as the suspension lasts, so it cannot be used to sign up again.\n'
       + '• Server logs are kept for up to 30 days. Copies in our providers\' backups expire on their normal schedules.'],
@@ -79,11 +82,11 @@ export const TERMS: LegalDoc = {
   intro: `By using Sproutly you agree to these terms. Questions: ${CONTACT_EMAIL}.`,
   sections: [
     ['Your account', 'You need a valid email address to sign in. Keep access to it safe; anyone with access to your email can sign in as you. You are responsible for activity on your account. You must be at least 13 years old to use Sproutly.'],
-    ['Be kind', 'Do not use Sproutly to harass, threaten, spam or impersonate anyone, or to share illegal, hateful, sexual or violent content, in chats, the Plaza, stories, posts or photos. We may remove content and suspend or delete accounts that break these rules. You can block and report people, messages, stories and posts in the app; content reported by several people may be hidden or removed automatically.'],
+    ['Be kind', 'Do not use Sproutly to harass, threaten, spam or impersonate anyone, or to share illegal, hateful, sexual or violent content, in chats, the Plaza, stories, posts, photos, your bio or the songs you share. We may remove content and suspend or delete accounts that break these rules. You can block and report people, messages, stories and posts in the app; content reported by several people may be hidden or removed automatically.'],
     ['Suspensions', `An account that several different people report within a short time is suspended automatically while we review it, and we can suspend any account that breaks these terms. A suspended account is signed out straight away, cannot sign in, and its email address cannot be used to create a new account while the suspension lasts. You can still delete a suspended account. If you think a suspension is a mistake, email ${CONTACT_EMAIL} from your account email and we will review it.`],
     ['Friends and games', 'Adding someone sends them a friend request; you become friends when they accept. You can only challenge friends to 1 vs 1 games, and a challenge expires if it is not answered within 10 minutes. Leaving a game in the middle counts as a loss, and in board games a player who does not move for a day loses. Arcade coins are capped per game and per day, and we may remove scores or coins that were not earned fairly.'],
     ['Fair use', 'Do not use bots, scripts or modified versions of the app, and do not try to get around limits, blocks or suspensions. We limit how often actions can be done; if you reach a limit, wait for the time the app shows.'],
-    ['Your content', 'You own what you post, including photos. You give us permission to store it and show it to the people you share it with, only to run the app. Only post photos you have the right to share.'],
+    ['Your content', 'You own what you post, including photos and your bio. You give us permission to store it and show it to the people you share it with, only to run the app. Only post photos you have the right to share. Songs you share are links to the music app they come from; Sproutly shows their title and cover but does not host or play the music.'],
     ['Messages and stories are temporary', 'Chat messages are deleted automatically 3 days after they are sent, and stories after 24 hours. Save anything you want to keep.'],
     ['Coins and items', 'Coins, eggs, shields, clothes, outfits and other in-app items are earned by using Sproutly. Some clothes are available only for a limited time or at events; items you already own stay yours. They have no real-world value, cannot be bought, sold or exchanged for money or anything outside the app, and are not refundable. We may change how they are earned or what they do, and they end when your account is deleted.'],
     ['Sproutly Plus', 'Plus is an optional subscription sold through Google Play or the App Store, billed monthly or yearly at the price shown in the app before you buy. If a free trial is offered, you are charged when it ends unless you cancel before then. It renews automatically until you cancel it in your store account settings, at least 24 hours before the renewal date. Refunds follow the store\'s policies. Deleting your Sproutly account does not cancel a store subscription.'],

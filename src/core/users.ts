@@ -1,10 +1,11 @@
 import type pg from 'pg';
+import { songOf, songsOf } from './music.js';
 import { toUsers } from '../lib/emitter.js';
 import { one, q, type Db } from '../db/pool.js';
 import { E } from '../lib/errors.js';
 import { onlineMap } from '../lib/presence.js';
 import { DEFAULT_CHAT_STYLE, initialsOf } from '../shared/rules.js';
-import { WALLPAPERS, type ChatStyle, type Companion, type Me, type Mood, type Outfit, type PaletteId, type Person, type UserStyle, type EquippedSlots } from '../shared/types.js';
+import { WALLPAPERS, type ChatStyle, type Companion, type Me, type Mood, type Outfit, type PaletteId, type Person, type UserProfile, type UserStyle, type EquippedSlots } from '../shared/types.js';
 import { resolveEquippedSlots } from '../shared/catalog.js';
 import { ROOM_LIVE_CAPACITY } from '../shared/types.js';
 import { liveCounts } from './live.js';
@@ -142,8 +143,8 @@ export async function getChatStyle(userId: string): Promise<{ style: ChatStyle; 
 }
 
 export async function getMe(userId: string): Promise<Me> {
-  const u = await one<{ id: string; handle: string; display_name: string; avatar_color: string; avatar_url: string | null; timezone: string; read_receipts: boolean; notifications_enabled: boolean; dm_policy: 'everyone' | 'friends' }>(
-    'SELECT id, handle, display_name, avatar_color, avatar_url, timezone, read_receipts, notifications_enabled, dm_policy FROM users WHERE id = $1', [userId],
+  const u = await one<{ id: string; handle: string; display_name: string; avatar_color: string; avatar_url: string | null; timezone: string; read_receipts: boolean; notifications_enabled: boolean; dm_policy: 'everyone' | 'friends'; bio: string | null }>(
+    'SELECT id, handle, display_name, avatar_color, avatar_url, timezone, read_receipts, notifications_enabled, dm_policy, bio FROM users WHERE id = $1', [userId],
   );
   if (!u) throw E.unauthorized();
   const [companion, entitlements, style, quests, approved] = await Promise.all([
@@ -151,7 +152,7 @@ export async function getMe(userId: string): Promise<Me> {
   ]);
   return {
     id: u.id, handle: u.handle, displayName: u.display_name, initials: initialsOf(u.display_name), avatarColor: u.avatar_color, avatarUrl: u.avatar_url,
-    timezone: u.timezone, readReceipts: u.read_receipts, dmPolicy: u.dm_policy ?? 'everyone', notificationsEnabled: u.notifications_enabled, approved, companion, entitlements, chatStyle: style.style, quests,
+    timezone: u.timezone, readReceipts: u.read_receipts, dmPolicy: u.dm_policy ?? 'everyone', bio: u.bio ?? null, notificationsEnabled: u.notifications_enabled, approved, companion, entitlements, chatStyle: style.style, quests,
   };
 }
 
@@ -226,7 +227,29 @@ export async function friends(userId: string): Promise<Person[]> {
     `SELECT u.id, u.display_name, u.handle, u.avatar_color, u.avatar_url FROM friendships f JOIN users u ON u.id = f.friend_id
       WHERE f.user_id = $1 AND f.status = 'accepted' ORDER BY u.display_name`, [userId],
   );
-  return toPeople(rows);
+  const [people, songs] = await Promise.all([toPeople(rows), songsOf(rows.map((r) => r.id))]);
+  return people.map((p) => (songs[p.id] ? { ...p, song: songs[p.id] } : p));
+}
+
+/** Someone's profile (name, photo, bio, companion, level, streak, Plus badge), plus their song for friends. */
+export async function profile(viewerId: string, userId: string): Promise<UserProfile> {
+  const u = await one<{ id: string; display_name: string; handle: string; avatar_color: string; avatar_url: string | null; bio: string | null }>(
+    'SELECT id, display_name, handle, avatar_color, avatar_url, bio FROM users WHERE id = $1 AND suspended_at IS NULL', [userId]);
+  if (!u) throw E.notFound('User not found');
+  const rel = (await relations(viewerId, [userId]))[userId] ?? 'none';
+  if (rel === 'blocked') throw E.notFound('User not found');
+  const [[person], companion, song, plus] = await Promise.all([
+    toPeople([u]),
+    getCompanion(userId).catch(() => null),
+    rel === 'friends' || rel === 'self' ? songOf(userId) : Promise.resolve(null),
+    getEntitlements(userId).then((e) => e.plusActive).catch(() => false),
+  ]);
+  return {
+    ...person!, relation: rel, song, bio: u.bio ?? null, plus,
+    companion: companion
+      ? { name: companion.name, palette: companion.palette, level: companion.level, equippedOutfit: companion.equippedOutfit, equippedSlots: companion.equippedSlots, streak: companion.streak }
+      : { name: 'Mo', palette: 'mo', level: 1, equippedOutfit: 'none', streak: 0 },
+  };
 }
 
 export async function blockUser(userId: string, targetId: string) {

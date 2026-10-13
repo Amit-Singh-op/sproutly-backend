@@ -1,0 +1,131 @@
+/**
+ * Songs from music apps (Spotify, YouTube / YouTube Music, Apple Music, SoundCloud), shown as cards:
+ *   - "your song" on your profile (friends see it on your profile and in their friends list), and
+ *   - in chats: a text message with a song link gets the card as its payload (see messages.ts).
+ * Title, artist and cover come from the provider's public preview (oEmbed, or Open Graph tags for Apple), so no
+ * account or API key is needed. Lookups are cached in Redis, so the same link shared again is instant.
+ */
+import { one, q } from '../db/pool.js';
+import { toUsers } from '../lib/emitter.js';
+import { AppError, E } from '../lib/errors.js';
+import { log } from '../lib/log.js';
+import { limit } from '../lib/ratelimit.js';
+import { redis } from '../lib/redis.js';
+import { providerOf, songKey } from '../shared/music.js';
+import type { SongCard } from '../shared/types.js';
+
+const TIMEOUT_MS = 5000;
+const clip = (s: string | null | undefined, n: number) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n) || null;
+const httpsOrNull = (u: unknown) => (typeof u === 'string' && /^https:\/\/[^\s]+$/.test(u) && u.length <= 500 ? u : null);
+
+// ---------------- lookup ----------------
+
+async function getJson(url: string): Promise<Record<string, unknown>> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { accept: 'application/json' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as Record<string, unknown>;
+}
+
+const metaContent = (html: string, prop: string) =>
+  html.match(new RegExp(`<meta[^>]+property=["']${prop}["'][^>]+content=["']([^"']*)["']`, 'i'))?.[1]
+  ?? html.match(new RegExp(`<meta[^>]+content=["']([^"']*)["'][^>]+property=["']${prop}["']`, 'i'))?.[1];
+const unescapeHtml = (s: string) => s.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+
+/** Title, artist and cover for a song link (the provider's public preview: oEmbed, or Open Graph tags for Apple). */
+export async function songFromLink(link: string): Promise<SongCard> {
+  const found = providerOf(link);
+  if (!found) throw E.badRequest('Paste a link from Spotify, YouTube, Apple Music or SoundCloud');
+  const { url, provider } = found;
+  const canonical = url.toString().slice(0, 500);
+  let title: string | null = null, artist: string | null = null, art: unknown = null;
+  try {
+    if (provider === 'spotify') {
+      const j = await getJson(`https://open.spotify.com/oembed?url=${encodeURIComponent(canonical)}`);
+      title = clip(j.title as string, 120);
+      art = j.thumbnail_url;
+    } else if (provider === 'youtube') {
+      // YouTube Music links work with YouTube's oEmbed once pointed at www.youtube.com.
+      const v = url.hostname === 'youtu.be' ? url.pathname.slice(1) : url.searchParams.get('v');
+      const lookup = v ? `https://www.youtube.com/watch?v=${encodeURIComponent(v)}` : canonical.replace('://music.', '://www.');
+      const j = await getJson(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(lookup)}`);
+      title = clip(j.title as string, 120);
+      artist = clip((j.author_name as string | undefined)?.replace(/\s+-\s+Topic$/, ''), 80);
+      art = j.thumbnail_url;
+    } else if (provider === 'soundcloud') {
+      const j = await getJson(`https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(canonical)}`);
+      artist = clip(j.author_name as string, 80);
+      const raw = (j.title as string | undefined) ?? '';
+      title = clip(artist && raw.endsWith(` by ${artist}`) ? raw.slice(0, -` by ${artist}`.length) : raw, 120);
+      art = j.thumbnail_url;
+    } else {
+      const res = await fetch(canonical, { signal: AbortSignal.timeout(TIMEOUT_MS), headers: { accept: 'text/html', 'user-agent': 'Mozilla/5.0 (compatible; SproutlyBot/1.0)' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const html = (await res.text()).slice(0, 300_000);
+      // "‎Song Name - Song by Artist - Apple Music" (also "Album by Artist on Apple Music")
+      const og = unescapeHtml(metaContent(html, 'og:title') ?? '').replace(/^‎/, '').replace(/\s+(-|on)\s+Apple Music$/i, '');
+      const m = og.match(/^(.*?)\s+-\s+(?:Song|Single|EP|Album)\s+by\s+(.*)$/i) ?? og.match(/^(.*?)\s+by\s+(.*)$/i);
+      title = clip(m ? m[1] : og, 120);
+      artist = clip(m?.[2], 80);
+      art = metaContent(html, 'og:image');
+    }
+  } catch (err) {
+    log.info({ provider, err: (err as Error).message }, 'song preview failed');
+    throw new AppError(422, 'SONG_NOT_FOUND', "Couldn't find that song. Check the link and try again.");
+  }
+  if (!title) throw new AppError(422, 'SONG_NOT_FOUND', "Couldn't find that song. Check the link and try again.");
+  return { url: canonical, title, artist, artUrl: httpsOrNull(art), provider };
+}
+
+/** songFromLink with a Redis cache: hits for a week, misses for an hour (so a broken link isn't fetched on every send). */
+export async function songCached(link: string): Promise<SongCard | null> {
+  const found = providerOf(link);
+  if (!found) return null;
+  const key = `song:${songKey(link)}`;
+  try {
+    const hit = await redis.get(key);
+    if (hit) return hit === '-' ? null : (JSON.parse(hit) as SongCard);
+  } catch { /* no cache: look it up */ }
+  const song = await songFromLink(link).catch(() => null);
+  redis.set(key, song ? JSON.stringify(song) : '-', 'EX', song ? 7 * 86400 : 3600).catch(() => {});
+  return song;
+}
+
+// ---------------- your song ----------------
+
+/** The song on someone's profile, or null. */
+export async function songOf(userId: string): Promise<SongCard | null> {
+  return (await one<{ song: SongCard | null }>('SELECT song FROM user_music WHERE user_id = $1', [userId]))?.song ?? null;
+}
+
+/** Songs for many people at once (the friends list). People without one are left out. */
+export async function songsOf(userIds: string[]): Promise<Record<string, SongCard>> {
+  const out: Record<string, SongCard> = {};
+  if (userIds.length === 0) return out;
+  const rows = await q<{ user_id: string; song: SongCard }>('SELECT user_id, song FROM user_music WHERE user_id = ANY($1::uuid[]) AND song IS NOT NULL', [userIds]);
+  for (const r of rows) out[r.user_id] = r.song;
+  return out;
+}
+
+/** Tell the person and their friends (blocks remove the friendship, so they're not in it). */
+async function tell(userId: string, song: SongCard | null) {
+  const rows = await q<{ id: string }>(`SELECT friend_id AS id FROM friendships WHERE user_id = $1 AND status = 'accepted'`, [userId]);
+  toUsers([userId, ...rows.map((r) => r.id)], 'music:update', { userId, song });
+}
+
+export async function setSong(userId: string, link: string): Promise<{ song: SongCard | null }> {
+  await limit(`music-song:${userId}`, { points: 10, windowS: 600 }, 'That’s a lot of songs.');
+  if (!providerOf(link)) throw E.badRequest('Paste a link from Spotify, YouTube, Apple Music or SoundCloud');
+  const song = await songCached(link);
+  if (!song) throw new AppError(422, 'SONG_NOT_FOUND', "Couldn't find that song. Check the link and try again.");
+  await q(
+    `INSERT INTO user_music (user_id, song) VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET song = EXCLUDED.song, updated_at = now()`, [userId, JSON.stringify(song)]);
+  await tell(userId, song);
+  return { song };
+}
+
+export async function clearSong(userId: string): Promise<{ song: SongCard | null }> {
+  await q('UPDATE user_music SET song = NULL, updated_at = now() WHERE user_id = $1', [userId]);
+  await tell(userId, null);
+  return { song: null };
+}

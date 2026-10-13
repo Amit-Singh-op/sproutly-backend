@@ -172,7 +172,8 @@ export interface Message {
   senderId: UUID | null;
   type: MessageType;
   body: string | null;
-  payload: StickerPayload | PollPayload | SystemPayload | null;
+  /** Text messages: a SongCard when the message has a song link in it. */
+  payload: StickerPayload | PollPayload | SystemPayload | SongCard | null;
   createdAt: string; // ISO
   editedAt: string | null;
   deletedAt: string | null;
@@ -359,6 +360,8 @@ export interface Me {
   dmPolicy: 'everyone' | 'friends';
   /** Settings → Notifications (push). Only private chats and @mentions in groups ever notify. */
   notificationsEnabled?: boolean;
+  /** Short bio on your profile (up to BIO_MAX characters), or null. */
+  bio?: string | null;
   /** Invite-only: false until an admin approves the account (the app shows the waitlist screen). */
   approved: boolean;
   companion: Companion;
@@ -399,7 +402,25 @@ export interface ConversationDetail {
 
 /** How you and someone else are connected: friends, a request either way, blocked, or nothing yet. */
 export type FriendRelation = 'self' | 'friends' | 'outgoing' | 'incoming' | 'blocked' | 'none';
-export interface Person { id: UUID; displayName: string; handle: string; avatarColor: string; avatarUrl?: string | null; initials: string; online?: boolean; relation?: FriendRelation }
+export interface Person { id: UUID; displayName: string; handle: string; avatarColor: string; avatarUrl?: string | null; initials: string; online?: boolean; relation?: FriendRelation; /** Friends list only: the song on their profile. */ song?: SongCard | null }
+
+// ---------------- music ----------------
+export type MusicProvider = 'spotify' | 'youtube' | 'apple' | 'soundcloud';
+/**
+ * A song from a music app, shown as a card that opens it there. On profiles ("your song") and on chat messages: a text
+ * message with a song link gets the card as its payload (older apps just show the link).
+ */
+export interface SongCard { url: string; title: string; artist: string | null; artUrl: string | null; provider: MusicProvider }
+/** Someone's profile as you see it. Song only for friends (and yourself); blocked or suspended people aren't found. */
+export const BIO_MAX = 160;
+export interface UserProfile extends Person {
+  relation: FriendRelation;
+  bio: string | null;
+  companion: { name: string; palette: PaletteId; level: number; equippedOutfit: Outfit; equippedSlots?: EquippedSlots; streak: number };
+  /** Has Sproutly Plus (shows the Plus badge). */
+  plus: boolean;
+  song: SongCard | null;
+}
 export interface FriendRequests { incoming: (Person & { requestedAt: string })[]; outgoing: (Person & { requestedAt: string })[] }
 
 // ---------------- 1v1 matches ----------------
@@ -575,7 +596,7 @@ export type NewStory = { kind: 'image'; imageUrl: string; text?: string } | { ki
 export interface ServiceEvents {
   'guestbook:new': GuestbookEntry;
   'msg:new': Message;
-  'msg:update': { id: UUID; conversationId: UUID; body?: string | null; editedAt?: string | null; deletedAt?: string | null };
+  'msg:update': { id: UUID; conversationId: UUID; body?: string | null; editedAt?: string | null; deletedAt?: string | null; /** An edit removed the song link: drop its card. */ payload?: null };
   'receipt:update': { conversationId: UUID; userId: UUID; deliveredSeq: number; readSeq: number; minDeliveredSeq: number; minReadSeq: number };
   'conv:update': { id: UUID; lastSeq: number; lastMessagePreview: string | null; lastMessageAt: string | null; unread: number; summary?: ConversationSummary };
   typing: { conversationId: UUID; userIds: UUID[] };
@@ -604,6 +625,8 @@ export interface ServiceEvents {
   'social:update': { userId: UUID };
   /** A friend request was sent, accepted, declined or cancelled, or someone was unfriended. */
   'friends:update': { userId: UUID };
+  /** Someone changed the song on their profile (sent to them and their friends). */
+  'music:update': { userId: UUID; song: SongCard | null };
   /** A 1v1 match changed (invite, accept, move, result): the full match as this person may see it. */
   'match:update': Match;
   /** Live race: the other player's score so far. */

@@ -6,11 +6,13 @@ import { registerDevice, report } from '../../core/misc.js';
 import { deleteAccount } from '../../core/account.js';
 import { toUsers } from '../../lib/emitter.js';
 import { isValidTimezone } from '../../lib/time.js';
-import { LIMITS, RATE_LIMITS } from '../../shared/rules.js';
+import { LIMITS, RATE_LIMITS, cleanText } from '../../shared/rules.js';
+import { BIO_MAX } from '../../shared/types.js';
 import { limit } from '../../lib/ratelimit.js';
 import { E } from '../../lib/errors.js';
 import { UPLOAD_FOLDERS, isOwnCloudinaryUrl, uploadSignature } from '../../lib/cloudinary.js';
 import { AnalyticsBody, recordEvents } from '../../core/analytics.js';
+import { clearSong, setSong, songOf } from '../../core/music.js';
 
 const PatchMe = z.object({
   displayName: z.string().trim().min(1).max(40).optional(),
@@ -19,12 +21,19 @@ const PatchMe = z.object({
   dmPolicy: z.enum(['everyone', 'friends']).optional(),
   notificationsEnabled: z.boolean().optional(),
   avatarUrl: z.string().url().max(500).nullable().optional(),
+  // Empty clears it; line breaks are kept (up to 3 lines), runs of blank lines are not.
+  bio: z.string().transform((v) => cleanText(v.replace(/\r/g, '')).replace(/\n{2,}/g, '\n').split('\n').slice(0, 3).join('\n')).pipe(z.string().max(BIO_MAX, `Keep your bio under ${BIO_MAX} characters`)).nullable().optional(),
 });
 const Device = z.object({ platform: z.enum(['ios', 'android']), pushToken: z.string().min(10).max(4096), appVersion: z.string().max(40).optional() });
 const Report = z.object({ targetType: z.enum(['user', 'message', 'post', 'story', 'comment']), targetId: z.string().uuid(), reason: z.string().min(1).max(500) });
 
 export async function meRoutes(app: FastifyInstance) {
   app.get('/me', async (req) => getMe(req.userId));
+
+  // Your song: a link from a music app, shown as a card on your profile (friends see it).
+  app.get('/me/music', async (req) => ({ song: await songOf(req.userId) }));
+  app.put('/me/music/song', async (req) => setSong(req.userId, z.object({ url: z.string().trim().min(8).max(500) }).parse(req.body).url));
+  app.delete('/me/music/song', async (req) => clearSong(req.userId));
 
   app.patch('/me', async (req) => {
     const p = PatchMe.parse(req.body);
@@ -34,6 +43,7 @@ export async function meRoutes(app: FastifyInstance) {
     if (p.timezone !== undefined) { vals.push(p.timezone); sets.push(`timezone = $${vals.length}`); }
     if (p.readReceipts !== undefined) { vals.push(p.readReceipts); sets.push(`read_receipts = $${vals.length}`); }
     if (p.dmPolicy !== undefined) { vals.push(p.dmPolicy); sets.push(`dm_policy = $${vals.length}`); }
+    if (p.bio !== undefined) { vals.push(p.bio || null); sets.push(`bio = $${vals.length}`); }
     if (p.notificationsEnabled !== undefined) { vals.push(p.notificationsEnabled); sets.push(`notifications_enabled = $${vals.length}`); }
     if (p.avatarUrl !== undefined) {
       if (p.avatarUrl !== null && !isOwnCloudinaryUrl(p.avatarUrl, req.userId)) throw E.badRequest('Upload the photo first, then save it.');
