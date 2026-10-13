@@ -1,5 +1,6 @@
 import type pg from 'pg';
 import { songsOfUser, topSongsOf } from './music.js';
+import { isAdmin } from './moderation.js';
 import { toUsers } from '../lib/emitter.js';
 import { one, q, type Db } from '../db/pool.js';
 import { E } from '../lib/errors.js';
@@ -13,12 +14,15 @@ import { getEntitlements } from './entitlements.js';
 import { ensureQuests } from './companion.js';
 import { isApproved } from './approval.js';
 import { relations } from './friends.js';
+import { isReservedName } from '../shared/safety.js';
 
 const AVATAR_COLORS = ['#2B2340', '#D9543A', '#7A5AF8', '#2F8A6C', '#3D6FD1', '#A8741A'];
 
 /** First sign-in: users + companions ("Mo", palette mo, level 1) + entitlements in one transaction (doc section 3). */
 export async function createUser(c: pg.PoolClient, login: string, displayName: string | undefined, timezone: string | undefined): Promise<string> {
-  const name = (displayName?.trim() || login.split('@')[0] || 'Sprout').slice(0, 40);
+  const wanted = (displayName?.trim() || login.split('@')[0] || 'Sprout').slice(0, 40);
+  // Names that could pass for Sproutly staff aren't taken (they can pick another in Profile).
+  const name = isReservedName(wanted) ? 'Sprout' : wanted;
   const base = name.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20) || 'sprout';
   let handle = base;
   for (let i = 0; i < 20 && (await one('SELECT 1 FROM users WHERE handle = $1', [handle], c)); i++) {
@@ -143,16 +147,19 @@ export async function getChatStyle(userId: string): Promise<{ style: ChatStyle; 
 }
 
 export async function getMe(userId: string): Promise<Me> {
-  const u = await one<{ id: string; handle: string; display_name: string; avatar_color: string; avatar_url: string | null; timezone: string; read_receipts: boolean; notifications_enabled: boolean; dm_policy: 'everyone' | 'friends'; bio: string | null }>(
-    'SELECT id, handle, display_name, avatar_color, avatar_url, timezone, read_receipts, notifications_enabled, dm_policy, bio FROM users WHERE id = $1', [userId],
+  const u = await one<{ id: string; handle: string; display_name: string; avatar_color: string; avatar_url: string | null; timezone: string; read_receipts: boolean; notifications_enabled: boolean; dm_policy: 'everyone' | 'friends'; bio: string | null; warning: string | null; muted_until: Date | null }>(
+    'SELECT id, handle, display_name, avatar_color, avatar_url, timezone, read_receipts, notifications_enabled, dm_policy, bio, warning, muted_until FROM users WHERE id = $1', [userId],
   );
   if (!u) throw E.unauthorized();
-  const [companion, entitlements, style, quests, approved] = await Promise.all([
-    getCompanion(userId), getEntitlements(userId), getChatStyle(userId), ensureQuests(userId), isApproved(userId),
+  const [companion, entitlements, style, quests, approved, admin] = await Promise.all([
+    getCompanion(userId), getEntitlements(userId), getChatStyle(userId), ensureQuests(userId), isApproved(userId), isAdmin(userId),
   ]);
+  const muted = u.muted_until && u.muted_until.getTime() > Date.now() ? u.muted_until : null;
+  const modNotice = u.warning ? { kind: 'warning' as const, message: u.warning, until: null }
+    : muted ? { kind: 'muted' as const, message: 'You can’t send messages or post right now. You can still read everything.', until: muted.toISOString() } : null;
   return {
     id: u.id, handle: u.handle, displayName: u.display_name, initials: initialsOf(u.display_name), avatarColor: u.avatar_color, avatarUrl: u.avatar_url,
-    timezone: u.timezone, readReceipts: u.read_receipts, dmPolicy: u.dm_policy ?? 'everyone', bio: u.bio ?? null, notificationsEnabled: u.notifications_enabled, approved, companion, entitlements, chatStyle: style.style, quests,
+    timezone: u.timezone, readReceipts: u.read_receipts, dmPolicy: u.dm_policy ?? 'everyone', bio: u.bio ?? null, isAdmin: admin, modNotice, notificationsEnabled: u.notifications_enabled, approved, companion, entitlements, chatStyle: style.style, quests,
   };
 }
 
@@ -217,7 +224,7 @@ export async function isBlocked(a: string, b: string): Promise<boolean> {
   return !!(await one(`SELECT 1 FROM friendships WHERE ((user_id = $1 AND friend_id = $2) OR (user_id = $2 AND friend_id = $1)) AND status = 'blocked'`, [a, b]));
 }
 
-async function toPeople(rows: { id: string; display_name: string; handle: string; avatar_color: string; avatar_url: string | null }[]): Promise<Person[]> {
+export async function toPeople(rows: { id: string; display_name: string; handle: string; avatar_color: string; avatar_url: string | null }[]): Promise<Person[]> {
   const online = await onlineMap(rows.map((r) => r.id));
   return rows.map((r) => ({ id: r.id, displayName: r.display_name, handle: r.handle, avatarColor: r.avatar_color, avatarUrl: r.avatar_url, initials: initialsOf(r.display_name), online: online[r.id] ?? false }));
 }

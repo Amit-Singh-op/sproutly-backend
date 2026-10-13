@@ -161,6 +161,7 @@ export async function purgeOldMessages() {
 export async function cleanup() {
   await q(`DELETE FROM webhook_events WHERE received_at < now() - interval '30 days'`);
   await q(`DELETE FROM otp_codes WHERE expires_at < now()`);
+  await q(`DELETE FROM deleted_messages WHERE expires_at < now()`);
   await q(`DELETE FROM refresh_tokens WHERE expires_at < now() OR revoked_at < now() - interval '7 days'`);
   await q(`DELETE FROM showcase_feed WHERE created_at < now() - interval '14 days'`);
   await q(`DELETE FROM activity WHERE created_at < now() - make_interval(days => $1)`, [ACTIVITY_KEEP_DAYS]);

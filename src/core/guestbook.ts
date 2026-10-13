@@ -8,6 +8,7 @@ import type { GuestbookEntry, GuestbookSticker, PaletteId } from '../shared/type
 import { isBlocked } from './users.js';
 import { notifyActivity } from './activity.js';
 import { recordSocialQuest } from './companion.js';
+import { autoFlag, requireNotMuted } from './moderation.js';
 
 interface EntryRow {
   id: string; owner_id: string; author_id: string; sticker: GuestbookSticker; note: string | null; palette: PaletteId; created_at: Date;
@@ -42,6 +43,7 @@ export async function listGuestbook(viewerId: string, ownerId: string) {
 /** One note per visitor per room per (visitor's) local day. The owner gets guestbook:new and a push. */
 export async function signGuestbook(authorId: string, ownerId: string, p: { sticker: GuestbookSticker; note?: string }): Promise<GuestbookEntry> {
   if (authorId === ownerId) throw E.badRequest("You can't sign your own guestbook");
+  await requireNotMuted(authorId);
   if (!(await one('SELECT 1 FROM users WHERE id = $1', [ownerId]))) throw E.notFound('Room not found');
   if (await isBlocked(authorId, ownerId)) throw E.notFound('Room not found');
   const note = p.note ? cleanText(p.note).slice(0, LIMITS.guestbookNoteMax) || null : null;
@@ -54,6 +56,7 @@ export async function signGuestbook(authorId: string, ownerId: string, p: { stic
   );
   if (!ins) throw new AppError(409, 'ALREADY_SIGNED', 'You already left a note here today');
   const entry = toEntry((await one<EntryRow>(`${SELECT} WHERE g.id = $1`, [ins.id]))!);
+  if (note) autoFlag(authorId, 'guestbook', ins.id, note);
   toUser(ownerId, 'guestbook:new', entry);
   await enqueue.push(`guestbook:${ins.id}`, { kind: 'guestbook', entryId: ins.id });
   await notifyActivity([ownerId], authorId, 'guestbook', {}, `guestbook:${ins.id}`);

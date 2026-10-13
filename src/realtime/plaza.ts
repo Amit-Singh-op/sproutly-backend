@@ -22,6 +22,7 @@ import { cleanText } from '../shared/rules.js';
 import { recordSocialQuest } from '../core/companion.js';
 import type { EquippedSlots, PlazaBall, PlazaEnterResult, PlazaSayResult, PlazaLine, PlazaOccupant, PlazaSpotId, PlazaSpotInfo, PlazaState } from '../shared/types.js';
 import { slotsOf } from '../core/users.js';
+import { autoFlag, mutedUntil } from '../core/moderation.js';
 
 const spotKey = (s: PlazaSpotId) => `plaza:${s}`;
 const linesKey = (s: PlazaSpotId) => `plaza:lines:${s}`;
@@ -249,6 +250,7 @@ export function registerPlaza(io: Server, raw: Socket, ready: Promise<void> = Pr
     void (async () => {
       const spot = socket.data.plazaSpot;
       if (!spot) return reply({ ok: false, message: 'Join a spot first' });
+      if (await mutedUntil(userId)) return reply({ ok: false, message: 'You can’t talk in the Plaza right now.' });
       const now = Date.now();
       sayTimes = sayTimes.filter((t) => now - t < PLAZA_LIMITS.say.windowS * 1000);
       if (sayTimes.length >= PLAZA_LIMITS.say.points) return reply({ ok: false, message: 'Slow down a little 🙂' });
@@ -260,6 +262,11 @@ export function registerPlaza(io: Server, raw: Socket, ready: Promise<void> = Pr
       await redis.lpush(linesKey(spot), JSON.stringify(line));
       await redis.ltrim(linesKey(spot), 0, PLAZA_HISTORY - 1);
       await redis.expire(linesKey(spot), PLAZA_HISTORY_TTL_S);
+      // Their last few lines (any spot) for 48 h, so a report from the Plaza shows what was said.
+      await redis.lpush(`plazalog:${userId}`, JSON.stringify({ spot, text, at: line.at }));
+      await redis.ltrim(`plazalog:${userId}`, 0, 19);
+      await redis.expire(`plazalog:${userId}`, 48 * 3600);
+      autoFlag(userId, 'user', userId, text);
       // Answer the sender first (with the line, so it shows on their screen right away), then tell everyone else.
       reply({ ok: true, line });
       await toSpot(io, spot, socket, 'plaza:say', { spot, line });

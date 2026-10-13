@@ -66,6 +66,12 @@ export async function deleteAccount(userId: string) {
         log.info({ userId, login: user.login }, 'preserved active subscription before account deletion');
       }
     }
+    // Private copies for moderators (kept 14 days), so deleting an account can't erase abuse before it's reported.
+    await q(
+      `INSERT INTO deleted_messages (message_id, conversation_id, sender_id, type, body, payload, sent_at)
+       SELECT id, conversation_id, sender_id, type, body, payload, created_at FROM messages
+        WHERE sender_id = $1 AND deleted_at IS NULL AND type <> 'system'
+       ON CONFLICT (message_id) DO NOTHING`, [userId], c);
     const wipedRows = await q<{ id: string; conversation_id: string; deleted_at: Date }>(
       `UPDATE messages SET sender_id = NULL, body = NULL, payload = NULL, deleted_at = COALESCE(deleted_at, now())
         WHERE sender_id = $1 RETURNING id, conversation_id, deleted_at`, [userId], c,
@@ -75,7 +81,7 @@ export async function deleteAccount(userId: string) {
       `UPDATE conversations c SET member_count = GREATEST(c.member_count - 1, 0)
          FROM conversation_members m WHERE m.conversation_id = c.id AND m.user_id = $1`, [userId], c,
     );
-    await q(`DELETE FROM reports WHERE target_type = 'user' AND target_id = $1`, [userId], c);
+    // Reports about this account stay (moderation records outlive the account; see the privacy policy).
     await q('DELETE FROM users WHERE id = $1', [userId], c);
     return wipedRows;
   });

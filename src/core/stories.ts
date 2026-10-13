@@ -6,6 +6,8 @@ import { E } from '../lib/errors.js';
 import { isOwnCloudinaryUrl } from '../lib/cloudinary.js';
 import { cleanText, initialsOf } from '../shared/rules.js';
 import { STORY_BGS, type NewStory, type Story, type StoryGroup } from '../shared/types.js';
+import { requireNotMuted } from './moderation.js';
+import { autoFlag } from './moderation.js';
 
 /** Most active stories one person can have at once. */
 const MAX_ACTIVE = 30;
@@ -71,16 +73,19 @@ export async function listStories(viewerId: string): Promise<StoryGroup[]> {
 }
 
 export async function createStory(userId: string, input: NewStory): Promise<StoryGroup[]> {
+  await requireNotMuted(userId);
   const active = await one<{ n: number }>('SELECT count(*)::int AS n FROM stories WHERE user_id = $1 AND expires_at > now()', [userId]);
   if ((active?.n ?? 0) >= MAX_ACTIVE) throw E.badRequest(`You can have up to ${MAX_ACTIVE} stories at a time. Delete one to add more.`);
   if (input.kind === 'image') {
     if (!isOwnCloudinaryUrl(input.imageUrl, userId, 'stories')) throw E.badRequest('Upload the photo first, then post it.');
     const caption = input.text ? cleanText(input.text).slice(0, TEXT_MAX) : null;
-    await q('INSERT INTO stories (user_id, kind, image_url, text) VALUES ($1, $2, $3, $4)', [userId, 'image', input.imageUrl, caption || null]);
+    const s = await one<{ id: string }>('INSERT INTO stories (user_id, kind, image_url, text) VALUES ($1, $2, $3, $4) RETURNING id', [userId, 'image', input.imageUrl, caption || null]);
+    if (s && caption) autoFlag(userId, 'story', s.id, caption);
   } else {
     const text = cleanText(input.text).slice(0, TEXT_MAX);
     if (!text) throw E.badRequest('Write something first');
-    await q('INSERT INTO stories (user_id, kind, text, bg) VALUES ($1, $2, $3, $4)', [userId, 'text', text, input.bg]);
+    const s = await one<{ id: string }>('INSERT INTO stories (user_id, kind, text, bg) VALUES ($1, $2, $3, $4) RETURNING id', [userId, 'text', text, input.bg]);
+    if (s) autoFlag(userId, 'story', s.id, text);
   }
   void audienceIds(userId).then((ids) => toUsers(ids, 'stories:update', { userId })).catch(() => {});
   return listStories(userId);

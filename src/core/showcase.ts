@@ -10,6 +10,8 @@ import { isOwnCloudinaryUrl } from '../lib/cloudinary.js';
 import { AUDIENCE } from './stories.js';
 import { audienceIds } from './audience.js';
 import { toUsers } from '../lib/emitter.js';
+import { requireNotMuted } from './moderation.js';
+import { autoFlag } from './moderation.js';
 
 /** Live updates to everyone who can see the author's posts (never blocks the request). */
 function live(authorId: string, send: (ids: string[]) => void) {
@@ -82,6 +84,7 @@ export async function getPost(userId: string, postId: string): Promise<ShowcaseP
 
 /** Up to SHOWCASE_DAILY_MAX posts per 24 h; the companion is snapshotted at post time. Photo optional; without one a caption is required. */
 export async function createPost(userId: string, rawCaption: string, imageUrl?: string | null, activity?: ShowcaseActivity | null, kind?: ShowcaseKind): Promise<ShowcasePost> {
+  await requireNotMuted(userId);
   const caption = cleanText(rawCaption ?? '').slice(0, 120);
   // Older apps don't send a kind: a post with no photo and no activity is a Mo update.
   const k: ShowcaseKind = kind ?? (imageUrl || activity ? 'day' : 'mo');
@@ -105,6 +108,7 @@ export async function createPost(userId: string, rawCaption: string, imageUrl?: 
   });
   await enqueue.fanout({ postId: id });
   live(userId, (ids) => toUsers(ids, 'showcase:new', { postId: id, userId }));
+  if (caption) autoFlag(userId, 'post', id, caption);
   return getPost(userId, id);
 }
 
@@ -163,17 +167,18 @@ export async function listComments(userId: string, postId: string, opts: { limit
     const lim = Math.min(Math.max(opts.limit, 1), 100);
     const cursor = opts.before && !Number.isNaN(Date.parse(opts.before)) ? opts.before : null;
     rows = (await q<CommentRow>(
-      `${COMMENT_SELECT} WHERE c.post_id = $2 AND ${NOT_BLOCKED} ${cursor ? 'AND c.created_at < $4::timestamptz' : ''}
+      `${COMMENT_SELECT} WHERE c.post_id = $2 AND NOT c.hidden AND ${NOT_BLOCKED} ${cursor ? 'AND c.created_at < $4::timestamptz' : ''}
         ORDER BY c.created_at DESC LIMIT $3`, cursor ? [userId, postId, lim, cursor] : [userId, postId, lim])).reverse();
   } else {
-    rows = await q<CommentRow>(`${COMMENT_SELECT} WHERE c.post_id = $2 AND ${NOT_BLOCKED} ORDER BY c.created_at ASC LIMIT 200`, [userId, postId]);
+    rows = await q<CommentRow>(`${COMMENT_SELECT} WHERE c.post_id = $2 AND NOT c.hidden AND ${NOT_BLOCKED} ORDER BY c.created_at ASC LIMIT 200`, [userId, postId]);
   }
   return rows.map(toComment);
 }
 
-const recount = `UPDATE showcase_posts SET comment_count = (SELECT count(*) FROM showcase_comments WHERE post_id = $1) WHERE id = $1 RETURNING comment_count`;
+const recount = `UPDATE showcase_posts SET comment_count = (SELECT count(*) FROM showcase_comments WHERE post_id = $1 AND NOT hidden) WHERE id = $1 RETURNING comment_count`;
 
 export async function addComment(userId: string, postId: string, rawBody: string): Promise<{ comment: ShowcaseComment; commentCount: number }> {
+  await requireNotMuted(userId);
   await limit(`comment:${userId}`, RATE_LIMITS.commentsPerUser);
   const body = cleanText(rawBody ?? '').slice(0, COMMENT_MAX);
   if (!body) throw E.badRequest('Write something first');
@@ -186,6 +191,7 @@ export async function addComment(userId: string, postId: string, rawBody: string
   const row = await one<CommentRow>(`${COMMENT_SELECT} WHERE c.id = $1`, [id]);
   const owner = await one<{ user_id: string }>('SELECT user_id FROM showcase_posts WHERE id = $1', [postId]);
   if (owner) live(owner.user_id, (ids) => toUsers(ids, 'showcase:update', { postId, commentCount: count }));
+  autoFlag(userId, 'comment', id, body);
   return { comment: toComment(row!), commentCount: count };
 }
 

@@ -13,6 +13,7 @@ import { limit } from '../lib/ratelimit.js';
 import { redis } from '../lib/redis.js';
 import { providerOf, songKey } from '../shared/music.js';
 import { SONGS_MAX, type SongCard } from '../shared/types.js';
+import { requireNotMuted } from './moderation.js';
 
 const TIMEOUT_MS = 5000;
 const clip = (s: string | null | undefined, n: number) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n) || null;
@@ -154,6 +155,7 @@ async function saveSongs(userId: string, songs: SongCard[]) {
 
 /** Add a song to the top of your list (the same link again just moves it up). Keeps the newest SONGS_MAX. */
 export async function addSong(userId: string, link: string): Promise<{ songs: SongCard[] }> {
+  await requireNotMuted(userId);
   await limit(`music-song:${userId}`, { points: 15, windowS: 600 }, 'That’s a lot of songs.');
   if (!providerOf(link)) throw E.badRequest('Paste a link from Spotify, YouTube, Apple Music or SoundCloud');
   const song = await songCached(link);

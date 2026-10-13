@@ -31,6 +31,10 @@ export function uploadSignature(userId: string, folder: UploadFolder) {
     folder: `sproutly/${folder}/${userId}`,
     timestamp: String(Math.floor(Date.now() / 1000)),
     transformation: 'c_limit,w_2048,h_2048',
+    // Photo scanning, when turned on: the add-on checks every upload and tells us about rejected ones.
+    ...(config.CLOUDINARY_MODERATION && config.PUBLIC_API_URL
+      ? { moderation: config.CLOUDINARY_MODERATION, notification_url: `${config.PUBLIC_API_URL.replace(/\/+$/, '')}/v1/webhooks/cloudinary` }
+      : {}),
   };
   const toSign = Object.keys(params).sort().map((k) => `${k}=${params[k]}`).join('&');
   const signature = createHash('sha1').update(toSign + c.apiSecret).digest('hex');
@@ -49,4 +53,9 @@ export function isOwnCloudinaryUrl(url: string, userId: string, folder: UploadFo
   const c = creds();
   if (!c) return false;
   return url.startsWith(`https://res.cloudinary.com/${c.cloudName}/image/upload/`) && url.includes(`/sproutly/${folder}/${userId}/`);
+}
+
+/** The API secret (for checking signed callbacks), or null when uploads aren't set up. */
+export function cloudinarySecret(): string | null {
+  return creds()?.apiSecret ?? null;
 }

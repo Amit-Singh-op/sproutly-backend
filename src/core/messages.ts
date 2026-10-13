@@ -18,6 +18,8 @@ import { memberIds, requireMember, summaryFor } from './conversations.js';
 import { requireLiveSeat } from './live.js';
 import { songCached } from './music.js';
 import { songKey, songLinkIn } from '../shared/music.js';
+import { requireNotMuted } from './moderation.js';
+import { autoFlag } from './moderation.js';
 
 // ---------------- validation (doc 6.2 step 2) ----------------
 const Text = z.string().transform(cleanText).pipe(z.string().min(1, 'Message is empty').max(LIMITS.textMax, 'Message is too long'));
@@ -128,6 +130,7 @@ async function fanOut(msg: Message, kind: 'dm' | 'group', senderName: string) {
 export async function sendMessage(userId: string, input: SendBody): Promise<Message> {
   const member = await requireMember(userId, input.conversationId);
   if (member.read_only) throw E.readOnly();
+  await requireNotMuted(userId);
   // Groups allow ROOM_LIVE_CAPACITY people in at once: sending needs one of those seats.
   await requireLiveSeat(userId, input.conversationId);
 
@@ -184,6 +187,7 @@ export async function sendMessage(userId: string, input: SendBody): Promise<Mess
   }
 
   const msg = (await toMessages([row], null))[0]!;
+  if (msg.type === 'text') autoFlag(userId, 'message', msg.id, msg.body);
   await fanOut(msg, conv?.kind ?? 'group', sender?.display_name ?? '');
   // Replying means the sender has read everything before it (afterInsert already moved their read_seq):
   // push the new watermark so the other side's ticks turn blue instead of waiting for a reload.
@@ -299,6 +303,11 @@ export async function editMessage(userId: string, messageId: string, rawBody: st
 export async function deleteMessage(userId: string, messageId: string) {
   const m = await ownMessage(userId, messageId);
   if (Date.now() - m.created_at.getTime() > LIMITS.deleteWindowMs) throw E.conflict('Messages can only be deleted for everyone within 1 hour');
+  // A private copy for moderators first (if this turns out to be abuse that gets reported), then wipe it for everyone.
+  await q(
+    `INSERT INTO deleted_messages (message_id, conversation_id, sender_id, type, body, payload, sent_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (message_id) DO NOTHING`,
+    [m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload === null ? null : JSON.stringify(m.payload), m.created_at]);
   const r = await one<{ deleted_at: Date }>('UPDATE messages SET deleted_at = now(), body = NULL, payload = NULL WHERE id = $1 RETURNING deleted_at', [messageId]);
   toUsers(await memberIds(m.conversation_id), 'msg:update', { id: m.id, conversationId: m.conversation_id, body: null, deletedAt: r!.deleted_at.toISOString() });
 }

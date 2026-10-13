@@ -7,15 +7,18 @@ import { deleteAccount } from '../../core/account.js';
 import { toUsers } from '../../lib/emitter.js';
 import { isValidTimezone } from '../../lib/time.js';
 import { LIMITS, RATE_LIMITS, cleanText } from '../../shared/rules.js';
-import { BIO_MAX } from '../../shared/types.js';
+import { BIO_MAX, REPORT_CATEGORIES } from '../../shared/types.js';
 import { limit } from '../../lib/ratelimit.js';
 import { E } from '../../lib/errors.js';
 import { UPLOAD_FOLDERS, isOwnCloudinaryUrl, uploadSignature } from '../../lib/cloudinary.js';
 import { AnalyticsBody, recordEvents } from '../../core/analytics.js';
 import { addSong, removeSong, songsOfUser } from '../../core/music.js';
+import { clearWarning, requireNotMuted } from '../../core/moderation.js';
+import { isReservedName } from '../../shared/safety.js';
+import { autoFlag } from '../../core/moderation.js';
 
 const PatchMe = z.object({
-  displayName: z.string().trim().min(1).max(40).optional(),
+  displayName: z.string().trim().min(1).max(40).refine((n) => !isReservedName(n), 'That name is reserved. Please pick another one.').optional(),
   timezone: z.string().refine(isValidTimezone, 'Unknown timezone').optional(),
   readReceipts: z.boolean().optional(),
   dmPolicy: z.enum(['everyone', 'friends']).optional(),
@@ -25,10 +28,16 @@ const PatchMe = z.object({
   bio: z.string().transform((v) => cleanText(v.replace(/\r/g, '')).replace(/\n{2,}/g, '\n').split('\n').slice(0, 3).join('\n')).pipe(z.string().max(BIO_MAX, `Keep your bio under ${BIO_MAX} characters`)).nullable().optional(),
 });
 const Device = z.object({ platform: z.enum(['ios', 'android']), pushToken: z.string().min(10).max(4096), appVersion: z.string().max(40).optional() });
-const Report = z.object({ targetType: z.enum(['user', 'message', 'post', 'story', 'comment']), targetId: z.string().uuid(), reason: z.string().min(1).max(500) });
+// Older apps send only a free-text reason (counted as 'other'); newer ones pick a category and may add a note.
+const Report = z.object({
+  targetType: z.enum(['user', 'message', 'post', 'story', 'comment', 'guestbook']), targetId: z.string().uuid(),
+  category: z.enum(REPORT_CATEGORIES).default('other'), reason: z.string().max(500).default(''),
+});
 
 export async function meRoutes(app: FastifyInstance) {
   app.get('/me', async (req) => getMe(req.userId));
+  // A moderator's warning was read: don't show it again.
+  app.post('/me/notice/seen', async (req) => { await clearWarning(req.userId); return { ok: true }; });
 
   // Your songs: links from music apps, shown as cards on your profile (friends see them). Newest first.
   const SongUrl = z.object({ url: z.string().trim().min(8).max(500) });
@@ -44,7 +53,9 @@ export async function meRoutes(app: FastifyInstance) {
     if (p.timezone !== undefined) { vals.push(p.timezone); sets.push(`timezone = $${vals.length}`); }
     if (p.readReceipts !== undefined) { vals.push(p.readReceipts); sets.push(`read_receipts = $${vals.length}`); }
     if (p.dmPolicy !== undefined) { vals.push(p.dmPolicy); sets.push(`dm_policy = $${vals.length}`); }
+    if (p.bio) await requireNotMuted(req.userId);
     if (p.bio !== undefined) { vals.push(p.bio || null); sets.push(`bio = $${vals.length}`); }
+    if (p.bio) autoFlag(req.userId, 'user', req.userId, p.bio);
     if (p.notificationsEnabled !== undefined) { vals.push(p.notificationsEnabled); sets.push(`notifications_enabled = $${vals.length}`); }
     if (p.avatarUrl !== undefined) {
       if (p.avatarUrl !== null && !isOwnCloudinaryUrl(p.avatarUrl, req.userId)) throw E.badRequest('Upload the photo first, then save it.');
@@ -99,7 +110,7 @@ export async function meRoutes(app: FastifyInstance) {
 
   app.post('/reports', async (req) => {
     const r = Report.parse(req.body);
-    await report(req.userId, r.targetType, r.targetId, r.reason);
+    await report(req.userId, r.targetType, r.targetId, r.category, r.reason);
     return { ok: true };
   });
 }

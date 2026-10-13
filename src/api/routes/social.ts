@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { q } from '../../db/pool.js';
 import { currentEvent } from '../../core/conversations.js';
 import { getDrop, claimDrop } from '../../core/drops.js';
 import { listGuestbook, signGuestbook } from '../../core/guestbook.js';
@@ -26,6 +27,8 @@ export async function socialRoutes(app: FastifyInstance) {
   app.post('/friends/:id/accept', async (req) => ({ relation: await acceptFriend(req.userId, Id.parse(req.params).id) }));
   app.post('/friends/:id/decline', async (req) => { await declineFriend(req.userId, Id.parse(req.params).id); return { relation: 'none' }; });
   app.delete('/friends/:id', async (req) => { await removeFriendOrRequest(req.userId, Id.parse(req.params).id); return { relation: 'none' }; });
+  // People you blocked (the app hides their messages in group chats).
+  app.get('/blocks', async (req) => ({ userIds: (await q<{ friend_id: string }>(`SELECT friend_id FROM friendships WHERE user_id = $1 AND status = 'blocked'`, [req.userId])).map((r) => r.friend_id) }));
   app.post('/users/:id/block', async (req) => { await blockUser(req.userId, Id.parse(req.params).id); return { ok: true }; });
 
   app.get('/search', async (req) => {

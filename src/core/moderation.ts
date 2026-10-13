@@ -1,28 +1,104 @@
 /**
- * Moderation: recording reports (with evidence), suspending accounts (automatically when several people report
- * someone, or by an admin) and lifting suspensions. A suspension takes effect immediately: sessions are revoked, the
- * app is told to sign out, and live connections are dropped. Everything is written to moderation_events, which
- * outlives the account, so it's easy to see what a person did.
+ * Moderation: reports (with a copy of what was reported), and what moderators can do about them.
+ *
+ * Protecting people who did nothing wrong comes first:
+ *   - reports never ban anyone by themselves. Enough reports from *trusted* reporters (accounts a few days old, not
+ *     suspended, whose reports aren't usually dismissed) put the account on a 24-hour hold: it can read but not send
+ *     anything until a moderator looks. Admins are told right away.
+ *   - you can only report what you can see, and only so many times a day (see report() in misc.ts).
+ * Moderators (ADMIN_EMAILS) then warn, remove content, mute, suspend for a while, ban, or dismiss. Everything is
+ * written to moderation_events, which outlives the account, so it's easy to see what a person did and who acted.
+ * A suspension takes effect immediately: sessions are revoked, the app signs out with the reason, connections drop.
  */
+import { config } from '../config.js';
 import { one, q } from '../db/pool.js';
 import { kickUser, toUser } from '../lib/emitter.js';
+import { AppError } from '../lib/errors.js';
+import { enqueue } from '../lib/queues.js';
 import { log } from '../lib/log.js';
 import { redis } from '../lib/redis.js';
+import { flagText } from '../shared/safety.js';
+import { REPORT_CATEGORY_INFO, type ReportCategory, type ReportTarget } from '../shared/types.js';
 
-/** Reports from this many different people within REPORT_WINDOW_DAYS suspend the account automatically. */
-export const AUTO_SUSPEND_REPORTERS = 3;
+/** Reports count from REPORT_WINDOW_DAYS back. */
 export const REPORT_WINDOW_DAYS = 7;
-const AUTO_REASON = 'Your account has been suspended because several people reported it. If you think this is a mistake, contact support.';
+/** Trusted reporters (different people) that put an account on hold; fewer for the most serious reasons. */
+const HOLD_REPORTERS = 3;
+const HOLD_REPORTERS_CRITICAL = 2;
+const HOLD_HOURS = 24;
+/** Reporters need an account this old to count towards a hold. */
+const TRUSTED_ACCOUNT_DAYS = 2;
+const HOLD_REASON = 'Your account is on hold while we look at some reports. You can still read everything, but you can’t send messages or post for now.';
+const DEFAULT_BAN_REASON = 'Your account has been suspended for breaking Sproutly’s community rules. If you think this is a mistake, contact support.';
 
-type TargetType = 'user' | 'message' | 'post' | 'story' | 'comment';
+type TargetType = ReportTarget;
 
-async function event(e: { userId: string | null; login?: string | null; kind: string; actor: string; reason?: string | null; details?: unknown }) {
+// ---------------- admins ----------------
+
+const adminLogins = new Set(config.ADMIN_EMAILS.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+
+/** Is this account a moderator? (ADMIN_EMAILS on the server: the app can't make anyone one.) */
+export async function isAdmin(userId: string): Promise<boolean> {
+  if (adminLogins.size === 0) return false;
+  const u = await one<{ login: string }>('SELECT login FROM users WHERE id = $1', [userId]);
+  return !!u && adminLogins.has(u.login.toLowerCase());
+}
+
+async function adminIds(): Promise<string[]> {
+  if (adminLogins.size === 0) return [];
+  return (await q<{ id: string }>('SELECT id FROM users WHERE lower(login) = ANY($1::text[])', [[...adminLogins]])).map((r) => r.id);
+}
+
+/** A push to every moderator (best effort). */
+function alertAdmins(title: string, body: string, ref: string) {
+  void adminIds().then((ids) => {
+    for (const id of ids) {
+      enqueue.push(`${ref}:${id}`, { kind: 'social', userId: id, title, body, data: { type: 'moderation' } }).catch(() => {});
+    }
+  }).catch(() => {});
+}
+
+export async function event(e: { userId: string | null; login?: string | null; kind: string; actor: string; reason?: string | null; details?: unknown }) {
   let login = e.login ?? null;
   if (!login && e.userId) login = (await one<{ login: string }>('SELECT login FROM users WHERE id = $1', [e.userId]))?.login ?? null;
+  // The network address and app install the account last used, kept with the moderation record only (see clientOf).
+  const client = e.userId && e.kind !== 'sign_in_blocked' ? await clientOf(e.userId) : null;
+  const details = { ...((e.details as Record<string, unknown>) ?? {}), ...(client ? { client } : {}) };
   await q(
     `INSERT INTO moderation_events (subject_user_id, subject_login, kind, actor, reason, details) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-    [e.userId, login, e.kind, e.actor, e.reason ?? null, JSON.stringify(e.details ?? {})],
+    [e.userId, login, e.kind, e.actor, e.reason ?? null, JSON.stringify(details)],
   );
+}
+
+// ---------------- where an account was last used (for moderation records only) ----------------
+
+const CLIENT_TTL_S = 30 * 86400;
+const DEVICE_ID = /^[A-Za-z0-9._-]{8,128}$/;
+
+/** A valid per-install id from the app's X-Device-Id header, or null. */
+export const deviceIdOf = (raw: unknown) => (typeof raw === 'string' && DEVICE_ID.test(raw) ? raw : null);
+
+/**
+ * Remember the network address and app install an account last used (30 days, in Redis). Nothing reads this except
+ * moderation: it's copied into a record when the account is reported or acted on. The install id is also listed in
+ * user_devices (once a day per install) so a permanent ban can cover the device.
+ */
+export async function recordClient(userId: string, ip: string, deviceId: string | null) {
+  await redis.set(`client:${userId}`, JSON.stringify({ ip, deviceId, at: new Date().toISOString() }), 'EX', CLIENT_TTL_S).catch(() => {});
+  if (deviceId && (await redis.set(`devseen:${userId}:${deviceId}`, '1', 'EX', 86400, 'NX').catch(() => null)) === 'OK') {
+    await q(`INSERT INTO user_devices (user_id, device_id) VALUES ($1, $2) ON CONFLICT (user_id, device_id) DO UPDATE SET last_seen = now()`, [userId, deviceId]).catch(() => {});
+  }
+}
+
+export async function clientOf(userId: string): Promise<{ ip: string; deviceId: string | null; at: string } | null> {
+  const raw = await redis.get(`client:${userId}`).catch(() => null);
+  try { return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+
+/** Is this app install banned (an account on it was banned for good)? */
+export async function deviceBanned(deviceId: string | null): Promise<boolean> {
+  if (!deviceId) return false;
+  return !!(await one('SELECT 1 FROM banned_devices WHERE device_id = $1', [deviceId]));
 }
 
 /** Who owns the reported thing, and a copy of it as it was when reported (it may expire or be deleted later). */
@@ -32,7 +108,15 @@ async function snapshot(type: TargetType, id: string): Promise<{ ownerId: string
       case 'user': {
         const u = await one<{ id: string; display_name: string; handle: string; avatar_url: string | null }>(
           'SELECT id, display_name, handle, avatar_url FROM users WHERE id = $1', [id]);
-        return { ownerId: u?.id ?? null, content: u ? { displayName: u.display_name, handle: u.handle, avatarUrl: u.avatar_url } : {} };
+        // What they said in the Plaza lately (the Plaza keeps no other record), for reports made from there.
+        const raw = u ? await redis.lrange(`plazalog:${u.id}`, 0, 9).catch(() => [] as string[]) : [];
+        const plaza = raw.map((l) => { try { return JSON.parse(l) as unknown; } catch { return null; } }).filter(Boolean);
+        return { ownerId: u?.id ?? null, content: u ? { displayName: u.display_name, handle: u.handle, avatarUrl: u.avatar_url, ...(plaza.length ? { plazaLines: plaza } : {}) } : {} };
+      }
+      case 'guestbook': {
+        const g = await one<{ author_id: string; owner_id: string; sticker: string; note: string | null; created_at: Date }>(
+          'SELECT author_id, owner_id, sticker, note, created_at FROM guestbook_entries WHERE id = $1', [id]);
+        return { ownerId: g?.author_id ?? null, content: g ? { body: g.note, sticker: g.sticker, roomOwnerId: g.owner_id, postedAt: g.created_at } : {} };
       }
       case 'message': {
         const m = await one<{ sender_id: string | null; conversation_id: string; type: string; body: string | null; payload: unknown; created_at: Date }>(
@@ -62,25 +146,49 @@ async function snapshot(type: TargetType, id: string): Promise<{ ownerId: string
   return { ownerId: null, content: {} };
 }
 
+/** Who owns a reported thing (null when it's gone, or was never there). */
+export async function reportedOwner(type: TargetType, id: string) {
+  return (await snapshot(type, id)).ownerId;
+}
+
 /**
- * After a report is filed: keep a copy of what was reported against the person who posted it, then suspend them if
- * enough different people have reported them recently. Never throws (a report must not fail because of this).
+ * After a report is saved: keep a copy of what was reported against its owner, then decide whether to put the owner
+ * on a short hold. Never throws (a report must not fail because of this). Reports never ban anyone.
  */
-export async function recordReport(reporterId: string, type: TargetType, targetId: string, reason: string) {
+export async function recordReport(reportId: string, reporterId: string, type: TargetType, targetId: string, category: ReportCategory, note: string) {
   try {
     const { ownerId, content } = await snapshot(type, targetId);
     if (!ownerId || ownerId === reporterId) return;
-    await event({ userId: ownerId, kind: 'report', actor: reporterId, reason, details: { targetType: type, targetId, content } });
+    await q('UPDATE reports SET subject_id = $2 WHERE id = $1', [reportId, ownerId]);
+    await event({ userId: ownerId, kind: 'report', actor: reporterId, reason: note || REPORT_CATEGORY_INFO[category].label, details: { reportId, category, targetType: type, targetId, content } });
+    if (await isAdmin(ownerId)) return;
 
-    const r = await one<{ n: number }>(
-      `SELECT count(DISTINCT actor)::int AS n FROM moderation_events
-        WHERE subject_user_id = $1 AND kind = 'report' AND created_at > now() - make_interval(days => $2)`,
-      [ownerId, REPORT_WINDOW_DAYS],
+    if (REPORT_CATEGORY_INFO[category].severity >= 4) alertAdmins('Urgent report', `${REPORT_CATEGORY_INFO[category].label}: open the moderation queue`, `modalert:${reportId}`);
+
+    // Different trusted people reporting this account recently: accounts a few days old, not suspended, and whose
+    // reports aren't usually dismissed. Self-harm reports never count towards a hold (that person needs care).
+    const r = await one<{ n: number; critical: number }>(
+      `SELECT count(DISTINCT rp.reporter_id)::int AS n,
+              (count(DISTINCT rp.reporter_id) FILTER (WHERE rp.category IN ('child_safety', 'violence')))::int AS critical
+         FROM reports rp JOIN users ru ON ru.id = rp.reporter_id
+        WHERE rp.subject_id = $1 AND rp.status <> 'dismissed' AND rp.category <> 'self_harm'
+          AND rp.created_at > now() - make_interval(days => $2)
+          AND ru.suspended_at IS NULL AND ru.created_at < now() - make_interval(days => $3)
+          AND (SELECT count(*) FILTER (WHERE d.status = 'dismissed')::float / greatest(count(*), 1)
+                 FROM reports d WHERE d.reporter_id = rp.reporter_id AND d.status <> 'open') < 0.6`,
+      [ownerId, REPORT_WINDOW_DAYS, TRUSTED_ACCOUNT_DAYS],
     );
-    if ((r?.n ?? 0) >= AUTO_SUSPEND_REPORTERS) {
-      const already = await one<{ s: Date | null }>('SELECT suspended_at AS s FROM users WHERE id = $1', [ownerId]);
-      if (already && !already.s) {
-        await suspendUser(ownerId, AUTO_REASON, 'system', { trigger: `${r!.n} people reported this account within ${REPORT_WINDOW_DAYS} days` });
+    const n = r?.n ?? 0, critical = r?.critical ?? 0;
+    if (n >= HOLD_REPORTERS || critical >= HOLD_REPORTERS_CRITICAL) {
+      const held = await one<{ id: string }>(
+        `UPDATE users SET muted_until = now() + make_interval(hours => $2)
+          WHERE id = $1 AND suspended_at IS NULL AND (muted_until IS NULL OR muted_until < now() + make_interval(hours => $2))
+          RETURNING id`, [ownerId, HOLD_HOURS]);
+      if (held) {
+        await redis.del(`mute:${ownerId}`).catch(() => {});
+        await event({ userId: ownerId, kind: 'auto_hold', actor: 'system', reason: HOLD_REASON, details: { trustedReporters: n, critical, hours: HOLD_HOURS } });
+        toUser(ownerId, 'me:notice', { kind: 'muted', message: HOLD_REASON, until: new Date(Date.now() + HOLD_HOURS * 3600_000).toISOString() });
+        alertAdmins('Account on hold', `${n} people reported someone. They're on a ${HOLD_HOURS}h hold until you review.`, `modhold:${ownerId}:${new Date().toISOString().slice(0, 13)}`);
       }
     }
   } catch (err) {
@@ -88,35 +196,98 @@ export async function recordReport(reporterId: string, type: TargetType, targetI
   }
 }
 
+// ---------------- mutes (can read, can't send) ----------------
+
+const MUTE_CACHE_S = 20;
+
+/** Until when this account can't send anything (null = it can). */
+export async function mutedUntil(userId: string): Promise<Date | null> {
+  const cached = await redis.get(`mute:${userId}`).catch(() => null);
+  if (cached !== null) return cached && Date.parse(cached) > Date.now() ? new Date(cached) : null;
+  const u = await one<{ muted_until: Date | null }>('SELECT muted_until FROM users WHERE id = $1', [userId]);
+  const until = u?.muted_until && u.muted_until.getTime() > Date.now() ? u.muted_until : null;
+  await redis.set(`mute:${userId}`, until ? until.toISOString() : '', 'EX', MUTE_CACHE_S).catch(() => {});
+  return until;
+}
+
+/** A friendly 403 while muted (sending messages, posting, commenting, stories, Plaza lines, guestbook, bio, songs). */
+export async function requireNotMuted(userId: string) {
+  const until = await mutedUntil(userId);
+  if (!until) return;
+  const when = until.toISOString().slice(0, 16).replace('T', ' ');
+  throw new AppError(403, 'MUTED', `You can’t send or post anything until ${when} UTC. You can still read everything.`, { until: until.toISOString() });
+}
+
+export async function mute(userId: string, hours: number, reason: string, actor: string) {
+  const r = await one<{ muted_until: Date }>('UPDATE users SET muted_until = now() + make_interval(hours => $2) WHERE id = $1 RETURNING muted_until', [userId, hours]);
+  await redis.del(`mute:${userId}`).catch(() => {});
+  await event({ userId, kind: 'mute', actor, reason, details: { hours } });
+  toUser(userId, 'me:notice', { kind: 'muted', message: reason, until: r?.muted_until.toISOString() ?? null });
+}
+
+export async function unmute(userId: string, reason: string, actor: string) {
+  await q('UPDATE users SET muted_until = NULL WHERE id = $1', [userId]);
+  await redis.del(`mute:${userId}`).catch(() => {});
+  await event({ userId, kind: 'unmute', actor, reason });
+}
+
+// ---------------- warnings ----------------
+
+/** A warning the person sees once, the next time the app opens (or right away when it's open). */
+export async function warn(userId: string, message: string, actor: string) {
+  await q('UPDATE users SET warning = $2 WHERE id = $1', [userId, message]);
+  await event({ userId, kind: 'warn', actor, reason: message });
+  toUser(userId, 'me:notice', { kind: 'warning', message, until: null });
+}
+
+export async function clearWarning(userId: string) {
+  await q('UPDATE users SET warning = NULL WHERE id = $1', [userId]);
+}
+
+// ---------------- suspensions and bans ----------------
+
 /**
- * Suspends an account, effective immediately: no sign-in (or sign-up with the same email), sessions revoked, the app
- * told to sign out with the reason, live connections dropped.
+ * Suspends an account, effective immediately: no sign-in (or sign-up with the same email) until `until` (null =
+ * a permanent ban), sessions revoked, the app told to sign out with the reason, live connections dropped.
  */
-export async function suspendUser(userId: string, reason: string, actor: 'system' | 'admin', details: Record<string, unknown> = {}) {
+export async function suspendUser(userId: string, reason: string, actor: string, details: Record<string, unknown> = {}, until: Date | null = null) {
+  const why = reason.trim() || DEFAULT_BAN_REASON;
   const u = await one<{ login: string }>(
-    'UPDATE users SET suspended_at = now(), suspended_reason = $2 WHERE id = $1 RETURNING login', [userId, reason]);
+    'UPDATE users SET suspended_at = now(), suspended_reason = $2, suspended_until = $3 WHERE id = $1 RETURNING login', [userId, why, until]);
   if (!u) throw new Error('No such user');
-  await q(`INSERT INTO banned_logins (login, reason) VALUES ($1, $2) ON CONFLICT (login) DO UPDATE SET reason = EXCLUDED.reason`, [u.login, reason]);
+  await q(`INSERT INTO banned_logins (login, reason, until) VALUES ($1, $2, $3) ON CONFLICT (login) DO UPDATE SET reason = EXCLUDED.reason, until = EXCLUDED.until`, [u.login, why, until]);
   await q('UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
   await redis.del(`susp:${userId}`).catch(() => {});
-  await event({ userId, login: u.login, kind: actor === 'system' ? 'auto_suspend' : 'suspend', actor, reason, details });
+  // A permanent ban also covers the app installs this account used, so a new email on the same phone won't work.
+  if (!until) await q(`INSERT INTO banned_devices (device_id, user_id, reason) SELECT device_id, user_id, $2 FROM user_devices WHERE user_id = $1 ON CONFLICT (device_id) DO NOTHING`, [userId, why]);
+  await event({ userId, login: u.login, kind: actor === 'system' ? 'auto_suspend' : 'suspend', actor, reason: why, details: { ...details, until: until?.toISOString() ?? null } });
   // Tell the open app first (it shows the reason and signs out), then cut the live connection.
-  toUser(userId, 'account:suspended', { message: reason });
+  toUser(userId, 'account:suspended', { message: why });
   setTimeout(() => kickUser(userId), 500);
+}
+
+/** Lifts a suspension by account id. */
+export async function unsuspendUser(userId: string, note: string, actor: string) {
+  const u = await one<{ login: string }>('UPDATE users SET suspended_at = NULL, suspended_reason = NULL, suspended_until = NULL WHERE id = $1 RETURNING login', [userId]);
+  if (u) await q('DELETE FROM banned_logins WHERE login = $1', [u.login]);
+  await q('DELETE FROM banned_devices WHERE user_id = $1', [userId]);
+  await redis.del(`susp:${userId}`).catch(() => {});
+  await event({ userId, login: u?.login ?? null, kind: 'unsuspend', actor, reason: note || null });
 }
 
 /** Lifts a suspension (by email), so the person can sign in again. */
 export async function unsuspendLogin(login: string, note = '') {
-  const u = await one<{ id: string }>('UPDATE users SET suspended_at = NULL, suspended_reason = NULL WHERE login = $1 RETURNING id', [login]);
+  const u = await one<{ id: string }>('UPDATE users SET suspended_at = NULL, suspended_reason = NULL, suspended_until = NULL WHERE login = $1 RETURNING id', [login]);
   await q('DELETE FROM banned_logins WHERE login = $1', [login]);
+  if (u) await q('DELETE FROM banned_devices WHERE user_id = $1', [u.id]);
   if (u) await redis.del(`susp:${u.id}`).catch(() => {});
   await event({ userId: u?.id ?? null, login, kind: 'unsuspend', actor: 'admin', reason: note || null });
 }
 
-/** Is this email banned from signing in or up? (Covers a suspended person who deleted their account.) */
+/** Is this email banned from signing in or up right now? (Covers a suspended person who deleted their account.) */
 export async function bannedLogin(login: string): Promise<string | null> {
-  const r = await one<{ reason: string | null }>('SELECT reason FROM banned_logins WHERE login = $1', [login]);
-  return r ? (r.reason?.trim() || 'Your account has been suspended for breaking Sproutly’s community rules. If you think this is a mistake, contact support.') : null;
+  const r = await one<{ reason: string | null }>('SELECT reason FROM banned_logins WHERE login = $1 AND (until IS NULL OR until > now())', [login]);
+  return r ? (r.reason?.trim() || DEFAULT_BAN_REASON) : null;
 }
 
 /** A suspended person tried to sign in: worth remembering (repeated attempts tell a story). */
@@ -128,4 +299,23 @@ export async function recordBlockedSignIn(login: string, userId: string | null) 
 export async function history(login: string) {
   return q<{ kind: string; actor: string; reason: string | null; details: unknown; created_at: Date }>(
     `SELECT kind, actor, reason, details, created_at FROM moderation_events WHERE subject_login = $1 ORDER BY created_at DESC LIMIT 200`, [login]);
+}
+
+// ---------------- automatic flags (never block anything) ----------------
+
+/**
+ * Text that matched the short flag list (shared/safety.ts) becomes a report from "Automatic" in the moderation queue,
+ * with a copy of the text. Nothing happens to the writer: no hold, no hiding, nothing they can see. Fire-and-forget.
+ */
+export function autoFlag(userId: string, targetType: TargetType, targetId: string, text: string | null | undefined) {
+  const category = flagText(text);
+  if (!category) return;
+  void (async () => {
+    if (await isAdmin(userId)) return;
+    const r = await one<{ id: string }>(
+      `INSERT INTO reports (reporter_id, target_type, target_id, reason, category, subject_id) VALUES (NULL, $1, $2, $3, $4, $5) RETURNING id`,
+      [targetType, targetId, 'Flagged automatically', category, userId]);
+    await event({ userId, kind: 'auto_flag', actor: 'system', reason: REPORT_CATEGORY_INFO[category].label, details: { reportId: r?.id, category, targetType, targetId, content: { body: text } } });
+    if (REPORT_CATEGORY_INFO[category].severity >= 4) alertAdmins('Flagged message', `${REPORT_CATEGORY_INFO[category].label}: open the moderation queue`, `modflag:${r?.id}`);
+  })().catch((err) => log.warn({ err, userId }, 'auto flag failed'));
 }

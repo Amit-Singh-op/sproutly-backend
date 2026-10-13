@@ -19,6 +19,9 @@ import { meRoutes } from './routes/me.js';
 import { paymentRoutes } from './routes/payments.js';
 import { socialRoutes } from './routes/social.js';
 import { webRoutes } from './routes/web.js';
+import { adminRoutes } from './routes/admin.js';
+import { deviceIdOf, recordClient } from '../core/moderation.js';
+import { cloudinaryHookRoutes } from './routes/cloudinaryHook.js';
 
 declare module 'fastify' {
   interface FastifyRequest { userId: string }
@@ -51,8 +54,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   // Treat an empty JSON body as "no body" instead of rejecting it: DELETE/POST requests without a payload that
   // still send Content-Type: application/json (e.g. un-voting a poll from older app builds) must keep working.
   app.removeContentTypeParser('application/json');
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, raw, done) => {
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, raw, done) => {
     const text = typeof raw === 'string' ? raw : raw.toString('utf8');
+    // Webhooks check a signature over the exact bytes received.
+    (req as unknown as { rawBody?: string }).rawBody = text;
     if (text.trim() === '') return done(null, undefined);
     try { done(null, JSON.parse(text)); } catch {
       const e = new Error('Invalid JSON') as Error & { statusCode: number };
@@ -95,9 +100,12 @@ export async function buildApp(): Promise<FastifyInstance> {
     v1.get('/config', async () => getAppConfig());
     await v1.register(authRoutes);
     await v1.register(paymentRoutes);
+    await v1.register(cloudinaryHookRoutes);
     await v1.register(async (authed) => {
       authed.addHook('onRequest', authenticate);
       authed.addHook('preHandler', suspensionGate);
+      // Where this account was last used (network address + app install), read only by moderation records.
+      authed.addHook('onResponse', async (req) => { if (req.userId) void recordClient(req.userId, req.ip, deviceIdOf(req.headers['x-device-id'])); });
       authed.addHook('preHandler', approvalGate);
       // Per-account limits: overall, and per action (reports, friend requests, buying, posting...).
       authed.addHook('preHandler', actionGate);
@@ -107,6 +115,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await authed.register(companionRoutes);
       await authed.register(gameRoutes);
       await authed.register(matchRoutes);
+      await authed.register(adminRoutes);
     });
   }, { prefix: '/v1' });
 

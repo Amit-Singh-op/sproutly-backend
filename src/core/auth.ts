@@ -15,6 +15,7 @@ import { requireNotSuspended } from './suspension.js';
 import { bannedLogin, recordBlockedSignIn } from './moderation.js';
 import { isReviewLogin, ensureReviewPlus } from './review.js';
 import { invalidatePlus } from './entitlements.js';
+import { isDisposableEmail } from '../shared/safety.js';
 
 export interface Tokens { accessToken: string; refreshToken: string; expiresIn: number; isNew?: boolean }
 
@@ -89,6 +90,7 @@ async function deliverOtp(login: string, code: string) {
 /** POST /auth/otp/start: 6 digits, hashed, 10 min, 5 attempts; 5 codes per hour per login. */
 export async function startOtp(raw: string): Promise<{ ok: true; devCode?: string }> {
   const login = normalizeLogin(raw);
+  if (isDisposableEmail(login)) throw E.badRequest('Please use your regular email address. Temporary email addresses can’t be used with Sproutly.');
   // A suspended account (or one deleted while suspended) can't sign in: say so before sending a code.
   const banned = await bannedLogin(login);
   if (banned) {

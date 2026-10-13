@@ -1,13 +1,25 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { logout, refresh, signInWithProvider, startOtp, verifyOtp } from '../../core/auth.js';
+import { deviceBanned, deviceIdOf, event } from '../../core/moderation.js';
+import { AppError } from '../../lib/errors.js';
 
 const Login = z.object({ phoneOrEmail: z.string().min(3).max(200) });
 const Verify = Login.extend({ code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'), displayName: z.string().max(40).optional(), timezone: z.string().max(64).optional() });
 const Provider = z.object({ idToken: z.string().min(10), displayName: z.string().max(40).optional(), timezone: z.string().max(64).optional() });
 const Refresh = z.object({ refreshToken: z.string().min(10) });
 
+/** An app install an account was banned on can't sign in or create a new account (any email). */
+async function deviceGate(req: FastifyRequest) {
+  const deviceId = deviceIdOf(req.headers['x-device-id']);
+  if (await deviceBanned(deviceId)) {
+    await event({ userId: null, kind: 'device_blocked', actor: 'system', details: { deviceId, path: req.url } }).catch(() => {});
+    throw new AppError(403, 'ACCOUNT_SUSPENDED', 'This device can’t be used with Sproutly because of an earlier ban. If you think this is a mistake, contact support.');
+  }
+}
+
 export async function authRoutes(app: FastifyInstance) {
+  app.addHook('preHandler', async (req) => { if (/\/auth\/(otp\/(start|verify)|apple|google)$/.test(req.url.split('?')[0] ?? '')) await deviceGate(req); });
   app.post('/auth/otp/start', async (req) => startOtp(Login.parse(req.body).phoneOrEmail));
   app.post('/auth/otp/verify', async (req) => {
     const b = Verify.parse(req.body);

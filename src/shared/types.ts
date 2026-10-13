@@ -362,6 +362,10 @@ export interface Me {
   notificationsEnabled?: boolean;
   /** Short bio on your profile (up to BIO_MAX characters), or null. */
   bio?: string | null;
+  /** Can open the moderation tools (set on the server, never by the app). */
+  isAdmin?: boolean;
+  /** A warning to show once, or that you're muted. */
+  modNotice?: ModNotice | null;
   /** Invite-only: false until an admin approves the account (the app shows the waitlist screen). */
   approved: boolean;
   companion: Companion;
@@ -403,6 +407,50 @@ export interface ConversationDetail {
 /** How you and someone else are connected: friends, a request either way, blocked, or nothing yet. */
 export type FriendRelation = 'self' | 'friends' | 'outgoing' | 'incoming' | 'blocked' | 'none';
 export interface Person { id: UUID; displayName: string; handle: string; avatarColor: string; avatarUrl?: string | null; initials: string; online?: boolean; relation?: FriendRelation; /** Friends list only: the newest song on their profile. */ song?: SongCard | null }
+
+// ---------------- moderation ----------------
+/** Why something was reported (the reporter picks one). Severity: 4 critical, 3 high, 2 medium, 1 low. */
+export const REPORT_CATEGORIES = ['child_safety', 'violence', 'harassment', 'hate', 'sexual', 'self_harm', 'spam', 'scam', 'impersonation', 'other'] as const;
+export type ReportCategory = (typeof REPORT_CATEGORIES)[number];
+export const REPORT_CATEGORY_INFO: Record<ReportCategory, { label: string; severity: 1 | 2 | 3 | 4 }> = {
+  child_safety: { label: 'Child safety', severity: 4 },
+  violence: { label: 'Threats or violence', severity: 4 },
+  self_harm: { label: 'Self-harm or suicide', severity: 4 },
+  harassment: { label: 'Bullying or harassment', severity: 3 },
+  hate: { label: 'Hate speech', severity: 3 },
+  sexual: { label: 'Sexual content', severity: 3 },
+  scam: { label: 'Scam or fraud', severity: 2 },
+  impersonation: { label: 'Pretending to be someone', severity: 2 },
+  spam: { label: 'Spam', severity: 1 },
+  other: { label: 'Something else', severity: 1 },
+};
+export type ReportTarget = 'user' | 'message' | 'post' | 'story' | 'comment' | 'guestbook';
+export type ModAction = 'dismiss' | 'warn' | 'remove_content' | 'mute' | 'unmute' | 'suspend' | 'ban' | 'unban';
+/** Where an account stands. suspendedUntil null with suspended = a permanent ban. */
+export interface ModStatus { suspended: boolean; suspendedUntil: string | null; mutedUntil: string | null; isAdmin: boolean }
+export interface ModQueueItem {
+  subject: Person; status: ModStatus;
+  openReports: number; reporters: number; severity: 1 | 2 | 3 | 4; topCategory: ReportCategory; lastReportedAt: string;
+}
+export interface ModReport {
+  id: UUID; category: ReportCategory; note: string; reporter: { id: UUID; displayName: string; handle: string } | null;
+  /** How often this reporter's past reports were dismissed (0..1): low trust when high. */
+  reporterDismissRate: number;
+  targetType: ReportTarget; targetId: UUID; content: Record<string, unknown>; contentHidden: boolean;
+  status: 'open' | 'actioned' | 'dismissed'; createdAt: string;
+}
+export interface ModEvent { kind: string; actor: string; actorName: string | null; reason: string | null; details: Record<string, unknown>; createdAt: string }
+export interface ModUserDetail {
+  person: Person; joinedAt: string; status: ModStatus; warning: string | null;
+  reports: ModReport[]; history: ModEvent[];
+  reportsFiled: number; reportsFiledDismissed: number;
+  /** Messages they deleted in the last 14 days (private copies, moderators only). */
+  deletedMessages: { id: UUID; conversationId: UUID; type: string; body: string | null; sentAt: string; deletedAt: string }[];
+}
+export interface ModLogItem extends ModEvent { subject: { id: UUID; displayName: string; handle: string } | null }
+export interface ModActionInput { action: ModAction; reason: string; hours?: number; days?: number; reportIds?: UUID[] }
+/** A message from the moderators, shown once when the app opens (warning), or while muted. */
+export interface ModNotice { kind: 'warning' | 'muted'; message: string; until: string | null }
 
 // ---------------- music ----------------
 export type MusicProvider = 'spotify' | 'youtube' | 'apple' | 'soundcloud';
@@ -628,6 +676,8 @@ export interface ServiceEvents {
   'social:update': { userId: UUID };
   /** A friend request was sent, accepted, declined or cancelled, or someone was unfriended. */
   'friends:update': { userId: UUID };
+  /** A moderator warned you, or you were muted / put on hold (shown as a notice). */
+  'me:notice': ModNotice;
   /** Someone changed the songs on their profile (sent to them and their friends), newest first. */
   'music:update': { userId: UUID; songs: SongCard[] };
   /** A 1v1 match changed (invite, accept, move, result): the full match as this person may see it. */

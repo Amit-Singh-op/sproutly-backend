@@ -43,6 +43,12 @@ const Env = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
+  // Moderators: comma-separated sign-in emails that can open the moderation tools. Empty = nobody.
+  ADMIN_EMAILS: z.string().default(''),
+  // Photo scanning (off unless set): a Cloudinary moderation add-on you enabled, e.g. aws_rek or webpurify.
+  CLOUDINARY_MODERATION: z.string().optional(),
+  // This server's public https address, for Cloudinary to send scan results to (e.g. https://api.sproutly.app).
+  PUBLIC_API_URL: z.string().url().optional(),
 });
 
 // Blank values (e.g. "GMAIL_USER=") mean unset, not an invalid email/url.

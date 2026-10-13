@@ -79,7 +79,9 @@ export async function handlePush(job: PushJob) {
     // Private chats notify every message; in groups only the people @mentioned get one.
     const all = await q<{ user_id: string; handle: string; display_name: string }>(
       `SELECT m.user_id, u.handle, u.display_name FROM conversation_members m JOIN users u ON u.id = m.user_id
-        WHERE m.conversation_id = $1 AND m.user_id <> $2 AND (m.muted_until IS NULL OR m.muted_until < now())`,
+        WHERE m.conversation_id = $1 AND m.user_id <> $2 AND (m.muted_until IS NULL OR m.muted_until < now())
+          AND NOT EXISTS (SELECT 1 FROM friendships b WHERE b.status = 'blocked'
+                AND ((b.user_id = m.user_id AND b.friend_id = $2) OR (b.user_id = $2 AND b.friend_id = m.user_id)))`,
       [m.conversation_id, m.sender_id],
     );
     const recipients = m.kind === 'dm' ? all : all.filter((r) => mentions(m.body, r.handle, r.display_name));
