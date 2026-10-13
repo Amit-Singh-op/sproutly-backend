@@ -1,5 +1,5 @@
 import type pg from 'pg';
-import { songOf, songsOf } from './music.js';
+import { songsOfUser, topSongsOf } from './music.js';
 import { toUsers } from '../lib/emitter.js';
 import { one, q, type Db } from '../db/pool.js';
 import { E } from '../lib/errors.js';
@@ -227,25 +227,25 @@ export async function friends(userId: string): Promise<Person[]> {
     `SELECT u.id, u.display_name, u.handle, u.avatar_color, u.avatar_url FROM friendships f JOIN users u ON u.id = f.friend_id
       WHERE f.user_id = $1 AND f.status = 'accepted' ORDER BY u.display_name`, [userId],
   );
-  const [people, songs] = await Promise.all([toPeople(rows), songsOf(rows.map((r) => r.id))]);
+  const [people, songs] = await Promise.all([toPeople(rows), topSongsOf(rows.map((r) => r.id))]);
   return people.map((p) => (songs[p.id] ? { ...p, song: songs[p.id] } : p));
 }
 
-/** Someone's profile (name, photo, bio, companion, level, streak, Plus badge), plus their song for friends. */
+/** Someone's profile (name, photo, bio, companion, level, streak, Plus badge), plus their songs for friends. */
 export async function profile(viewerId: string, userId: string): Promise<UserProfile> {
   const u = await one<{ id: string; display_name: string; handle: string; avatar_color: string; avatar_url: string | null; bio: string | null }>(
     'SELECT id, display_name, handle, avatar_color, avatar_url, bio FROM users WHERE id = $1 AND suspended_at IS NULL', [userId]);
   if (!u) throw E.notFound('User not found');
   const rel = (await relations(viewerId, [userId]))[userId] ?? 'none';
   if (rel === 'blocked') throw E.notFound('User not found');
-  const [[person], companion, song, plus] = await Promise.all([
+  const [[person], companion, songs, plus] = await Promise.all([
     toPeople([u]),
     getCompanion(userId).catch(() => null),
-    rel === 'friends' || rel === 'self' ? songOf(userId) : Promise.resolve(null),
+    rel === 'friends' || rel === 'self' ? songsOfUser(userId) : Promise.resolve([]),
     getEntitlements(userId).then((e) => e.plusActive).catch(() => false),
   ]);
   return {
-    ...person!, relation: rel, song, bio: u.bio ?? null, plus,
+    ...person!, relation: rel, songs, bio: u.bio ?? null, plus,
     companion: companion
       ? { name: companion.name, palette: companion.palette, level: companion.level, equippedOutfit: companion.equippedOutfit, equippedSlots: companion.equippedSlots, streak: companion.streak }
       : { name: 'Mo', palette: 'mo', level: 1, equippedOutfit: 'none', streak: 0 },

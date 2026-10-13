@@ -1,6 +1,6 @@
 /**
  * Songs from music apps (Spotify, YouTube / YouTube Music, Apple Music, SoundCloud), shown as cards:
- *   - "your song" on your profile (friends see it on your profile and in their friends list), and
+ *   - "your songs" on your profile, up to SONGS_MAX (friends see them on your profile, the newest in their friends list), and
  *   - in chats: a text message with a song link gets the card as its payload (see messages.ts).
  * Title, artist and cover come from the provider's public preview (oEmbed, or Open Graph tags for Apple), so no
  * account or API key is needed. Lookups are cached in Redis, so the same link shared again is instant.
@@ -12,7 +12,7 @@ import { log } from '../lib/log.js';
 import { limit } from '../lib/ratelimit.js';
 import { redis } from '../lib/redis.js';
 import { providerOf, songKey } from '../shared/music.js';
-import type { SongCard } from '../shared/types.js';
+import { SONGS_MAX, type SongCard } from '../shared/types.js';
 
 const TIMEOUT_MS = 5000;
 const clip = (s: string | null | undefined, n: number) => (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n) || null;
@@ -90,42 +90,48 @@ export async function songCached(link: string): Promise<SongCard | null> {
   return song;
 }
 
-// ---------------- your song ----------------
+// ---------------- your songs ----------------
 
-/** The song on someone's profile, or null. */
-export async function songOf(userId: string): Promise<SongCard | null> {
-  return (await one<{ song: SongCard | null }>('SELECT song FROM user_music WHERE user_id = $1', [userId]))?.song ?? null;
+/** The songs on someone's profile, newest first. */
+export async function songsOfUser(userId: string): Promise<SongCard[]> {
+  return (await one<{ songs: SongCard[] }>('SELECT songs FROM user_music WHERE user_id = $1', [userId]))?.songs ?? [];
 }
 
-/** Songs for many people at once (the friends list). People without one are left out. */
-export async function songsOf(userIds: string[]): Promise<Record<string, SongCard>> {
+/** The newest song of many people at once (the friends list). People without one are left out. */
+export async function topSongsOf(userIds: string[]): Promise<Record<string, SongCard>> {
   const out: Record<string, SongCard> = {};
   if (userIds.length === 0) return out;
-  const rows = await q<{ user_id: string; song: SongCard }>('SELECT user_id, song FROM user_music WHERE user_id = ANY($1::uuid[]) AND song IS NOT NULL', [userIds]);
+  const rows = await q<{ user_id: string; song: SongCard }>(
+    `SELECT user_id, songs->0 AS song FROM user_music WHERE user_id = ANY($1::uuid[]) AND jsonb_array_length(songs) > 0`, [userIds]);
   for (const r of rows) out[r.user_id] = r.song;
   return out;
 }
 
 /** Tell the person and their friends (blocks remove the friendship, so they're not in it). */
-async function tell(userId: string, song: SongCard | null) {
+async function tell(userId: string, songs: SongCard[]) {
   const rows = await q<{ id: string }>(`SELECT friend_id AS id FROM friendships WHERE user_id = $1 AND status = 'accepted'`, [userId]);
-  toUsers([userId, ...rows.map((r) => r.id)], 'music:update', { userId, song });
+  toUsers([userId, ...rows.map((r) => r.id)], 'music:update', { userId, songs });
 }
 
-export async function setSong(userId: string, link: string): Promise<{ song: SongCard | null }> {
-  await limit(`music-song:${userId}`, { points: 10, windowS: 600 }, 'That’s a lot of songs.');
+async function saveSongs(userId: string, songs: SongCard[]) {
+  await q(
+    `INSERT INTO user_music (user_id, songs) VALUES ($1, $2)
+     ON CONFLICT (user_id) DO UPDATE SET songs = EXCLUDED.songs, updated_at = now()`, [userId, JSON.stringify(songs)]);
+  await tell(userId, songs);
+  return { songs };
+}
+
+/** Add a song to the top of your list (the same link again just moves it up). Keeps the newest SONGS_MAX. */
+export async function addSong(userId: string, link: string): Promise<{ songs: SongCard[] }> {
+  await limit(`music-song:${userId}`, { points: 15, windowS: 600 }, 'That’s a lot of songs.');
   if (!providerOf(link)) throw E.badRequest('Paste a link from Spotify, YouTube, Apple Music or SoundCloud');
   const song = await songCached(link);
   if (!song) throw new AppError(422, 'SONG_NOT_FOUND', "Couldn't find that song. Check the link and try again.");
-  await q(
-    `INSERT INTO user_music (user_id, song) VALUES ($1, $2)
-     ON CONFLICT (user_id) DO UPDATE SET song = EXCLUDED.song, updated_at = now()`, [userId, JSON.stringify(song)]);
-  await tell(userId, song);
-  return { song };
+  const now = await songsOfUser(userId);
+  return saveSongs(userId, [song, ...now.filter((s) => s.url !== song.url)].slice(0, SONGS_MAX));
 }
 
-export async function clearSong(userId: string): Promise<{ song: SongCard | null }> {
-  await q('UPDATE user_music SET song = NULL, updated_at = now() WHERE user_id = $1', [userId]);
-  await tell(userId, null);
-  return { song: null };
+export async function removeSong(userId: string, url: string): Promise<{ songs: SongCard[] }> {
+  const now = await songsOfUser(userId);
+  return saveSongs(userId, now.filter((s) => s.url !== url));
 }

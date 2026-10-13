@@ -12,7 +12,7 @@ import { limit } from '../../lib/ratelimit.js';
 import { E } from '../../lib/errors.js';
 import { UPLOAD_FOLDERS, isOwnCloudinaryUrl, uploadSignature } from '../../lib/cloudinary.js';
 import { AnalyticsBody, recordEvents } from '../../core/analytics.js';
-import { clearSong, setSong, songOf } from '../../core/music.js';
+import { addSong, removeSong, songsOfUser } from '../../core/music.js';
 
 const PatchMe = z.object({
   displayName: z.string().trim().min(1).max(40).optional(),
@@ -30,10 +30,11 @@ const Report = z.object({ targetType: z.enum(['user', 'message', 'post', 'story'
 export async function meRoutes(app: FastifyInstance) {
   app.get('/me', async (req) => getMe(req.userId));
 
-  // Your song: a link from a music app, shown as a card on your profile (friends see it).
-  app.get('/me/music', async (req) => ({ song: await songOf(req.userId) }));
-  app.put('/me/music/song', async (req) => setSong(req.userId, z.object({ url: z.string().trim().min(8).max(500) }).parse(req.body).url));
-  app.delete('/me/music/song', async (req) => clearSong(req.userId));
+  // Your songs: links from music apps, shown as cards on your profile (friends see them). Newest first.
+  const SongUrl = z.object({ url: z.string().trim().min(8).max(500) });
+  app.get('/me/music', async (req) => ({ songs: await songsOfUser(req.userId) }));
+  app.post('/me/music/songs', async (req) => addSong(req.userId, SongUrl.parse(req.body).url));
+  app.delete('/me/music/songs', async (req) => removeSong(req.userId, SongUrl.parse(req.query).url));
 
   app.patch('/me', async (req) => {
     const p = PatchMe.parse(req.body);

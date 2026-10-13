@@ -402,7 +402,7 @@ export interface ConversationDetail {
 
 /** How you and someone else are connected: friends, a request either way, blocked, or nothing yet. */
 export type FriendRelation = 'self' | 'friends' | 'outgoing' | 'incoming' | 'blocked' | 'none';
-export interface Person { id: UUID; displayName: string; handle: string; avatarColor: string; avatarUrl?: string | null; initials: string; online?: boolean; relation?: FriendRelation; /** Friends list only: the song on their profile. */ song?: SongCard | null }
+export interface Person { id: UUID; displayName: string; handle: string; avatarColor: string; avatarUrl?: string | null; initials: string; online?: boolean; relation?: FriendRelation; /** Friends list only: the newest song on their profile. */ song?: SongCard | null }
 
 // ---------------- music ----------------
 export type MusicProvider = 'spotify' | 'youtube' | 'apple' | 'soundcloud';
@@ -411,15 +411,18 @@ export type MusicProvider = 'spotify' | 'youtube' | 'apple' | 'soundcloud';
  * message with a song link gets the card as its payload (older apps just show the link).
  */
 export interface SongCard { url: string; title: string; artist: string | null; artUrl: string | null; provider: MusicProvider }
-/** Someone's profile as you see it. Song only for friends (and yourself); blocked or suspended people aren't found. */
+/** Someone's profile as you see it. Songs only for friends (and yourself); blocked or suspended people aren't found. */
 export const BIO_MAX = 160;
+/** Songs on a profile. */
+export const SONGS_MAX = 5;
 export interface UserProfile extends Person {
   relation: FriendRelation;
   bio: string | null;
   companion: { name: string; palette: PaletteId; level: number; equippedOutfit: Outfit; equippedSlots?: EquippedSlots; streak: number };
   /** Has Sproutly Plus (shows the Plus badge). */
   plus: boolean;
-  song: SongCard | null;
+  /** Newest first; empty unless you're friends. */
+  songs: SongCard[];
 }
 export interface FriendRequests { incoming: (Person & { requestedAt: string })[]; outgoing: (Person & { requestedAt: string })[] }
 
@@ -625,8 +628,8 @@ export interface ServiceEvents {
   'social:update': { userId: UUID };
   /** A friend request was sent, accepted, declined or cancelled, or someone was unfriended. */
   'friends:update': { userId: UUID };
-  /** Someone changed the song on their profile (sent to them and their friends). */
-  'music:update': { userId: UUID; song: SongCard | null };
+  /** Someone changed the songs on their profile (sent to them and their friends), newest first. */
+  'music:update': { userId: UUID; songs: SongCard[] };
   /** A 1v1 match changed (invite, accept, move, result): the full match as this person may see it. */
   'match:update': Match;
   /** Live race: the other player's score so far. */
