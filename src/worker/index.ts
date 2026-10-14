@@ -5,6 +5,7 @@ import { bullConnection } from '../lib/redis.js';
 import { queue, type EntitlementJob, type FanoutJob, type PushJob, type QuestJob } from '../lib/queues.js';
 import { cleanup, purgeOldMessages, expireLapsedSubscriptions, handleEntitlement, handleFanout, handleQuest, streakResets, weeklyTop } from './jobs.js';
 import { handlePush } from './push.js';
+import { remindUrgentReports } from '../core/moderation.js';
 
 const workers = [
   new Worker<PushJob>('push', (j) => handlePush(j.data), { connection: bullConnection(), concurrency: 20 }),
@@ -18,6 +19,7 @@ const workers = [
       case 'expire-subscriptions': return expireLapsedSubscriptions();
       case 'cleanup': return cleanup();
       case 'purge-messages': return purgeOldMessages();
+      case 'mod-reminders': return remindUrgentReports();
     }
   }, { connection: bullConnection(), concurrency: 1 }),
 ];
@@ -38,6 +40,8 @@ await m.upsertJobScheduler('expire-subscriptions', { pattern: '15 * * * *' }, { 
 await m.upsertJobScheduler('cleanup', { pattern: '30 3 * * *', tz: 'UTC' }, { name: 'cleanup' });
 // Messages older than 3 days are deleted every hour (reads already hide them the moment they turn 3 days old).
 await m.upsertJobScheduler('purge-messages', { pattern: '20 * * * *' }, { name: 'purge-messages' });
+// Urgent reports nobody has reviewed yet: remind moderators (every 15 min check, at most every 2 h per report).
+await m.upsertJobScheduler('mod-reminders', { pattern: '*/15 * * * *' }, { name: 'mod-reminders' });
 
 log.info('worker running: push, quests, showcase-fanout, entitlement-sync, maintenance');
 

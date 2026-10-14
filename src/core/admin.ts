@@ -9,7 +9,7 @@ import { one, q } from '../db/pool.js';
 import { toUsers } from '../lib/emitter.js';
 import { AppError, E } from '../lib/errors.js';
 import { memberIds } from './conversations.js';
-import { event, isAdmin, mute, suspendUser, unmute, unsuspendUser, warn } from './moderation.js';
+import { event, isAdmin, mute, suspendUser, thankReporters, unmute, unsuspendUser, warn } from './moderation.js';
 import { toPeople } from './users.js';
 import { REPORT_CATEGORIES, REPORT_CATEGORY_INFO, type ModEvent, type ModLogItem, type ModQueueItem, type ModReport, type ModStatus, type ModUserDetail, type ReportCategory, type ReportTarget } from '../shared/types.js';
 
@@ -157,30 +157,30 @@ export async function act(adminId: string, userId: string, body: ActionBody): Pr
     }
     case 'warn':
       await warn(userId, body.reason, adminId);
-      await closeReports('actioned');
+      await thankReporters((await closeReports('actioned')).map((r) => r.id));
       break;
     case 'remove_content': {
       const open = await q<{ id: string; target_type: ReportTarget; target_id: string }>(
         `SELECT id, target_type, target_id FROM reports WHERE subject_id = $1 AND status = 'open' ${reportFilter}`, args);
       for (const r of open) if (r.target_type !== 'user') await removeTarget(r.target_type, r.target_id);
-      await closeReports('actioned');
+      await thankReporters((await closeReports('actioned')).map((r) => r.id));
       await event({ userId, kind: 'remove_content', actor: adminId, reason: body.reason, details: { targets: open.map((r) => ({ type: r.target_type, id: r.target_id })) } });
       break;
     }
     case 'mute':
       await mute(userId, body.hours ?? 24, body.reason, adminId);
-      await closeReports('actioned');
+      await thankReporters((await closeReports('actioned')).map((r) => r.id));
       break;
     case 'unmute':
       await unmute(userId, body.reason, adminId);
       break;
     case 'suspend':
       await suspendUser(userId, body.reason, adminId, {}, new Date(Date.now() + (body.days ?? 7) * 86400_000));
-      await closeReports('actioned');
+      await thankReporters((await closeReports('actioned')).map((r) => r.id));
       break;
     case 'ban':
       await suspendUser(userId, body.reason, adminId, {}, null);
-      await closeReports('actioned');
+      await thankReporters((await closeReports('actioned')).map((r) => r.id));
       break;
     case 'unban':
       await unsuspendUser(userId, body.reason, adminId);

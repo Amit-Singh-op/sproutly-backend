@@ -15,6 +15,9 @@ import { ensureQuests } from './companion.js';
 import { isApproved } from './approval.js';
 import { relations } from './friends.js';
 import { isReservedName } from '../shared/safety.js';
+import { isAdminLogin } from './moderation.js';
+import { ensureAdminPlus } from './review.js';
+import { invalidatePlus } from './entitlements.js';
 
 const AVATAR_COLORS = ['#2B2340', '#D9543A', '#7A5AF8', '#2F8A6C', '#3D6FD1', '#A8741A'];
 
@@ -22,7 +25,7 @@ const AVATAR_COLORS = ['#2B2340', '#D9543A', '#7A5AF8', '#2F8A6C', '#3D6FD1', '#
 export async function createUser(c: pg.PoolClient, login: string, displayName: string | undefined, timezone: string | undefined): Promise<string> {
   const wanted = (displayName?.trim() || login.split('@')[0] || 'Sprout').slice(0, 40);
   // Names that could pass for Sproutly staff aren't taken (they can pick another in Profile).
-  const name = isReservedName(wanted) ? 'Sprout' : wanted;
+  const name = isReservedName(wanted) && !isAdminLogin(login) ? 'Sprout' : wanted;
   const base = name.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20) || 'sprout';
   let handle = base;
   for (let i = 0; i < 20 && (await one('SELECT 1 FROM users WHERE handle = $1', [handle], c)); i++) {
@@ -154,12 +157,19 @@ export async function getMe(userId: string): Promise<Me> {
   const [companion, entitlements, style, quests, approved, admin] = await Promise.all([
     getCompanion(userId), getEntitlements(userId), getChatStyle(userId), ensureQuests(userId), isApproved(userId), isAdmin(userId),
   ]);
+  // Moderators have Plus (topped up here, so it lasts while they're moderators).
+  let ent = entitlements;
+  if (admin && (!ent.plusActive || !ent.currentPeriodEnd || Date.parse(ent.currentPeriodEnd) < Date.now() + 7 * 86400_000)) {
+    await ensureAdminPlus(userId);
+    await invalidatePlus(userId);
+    ent = await getEntitlements(userId);
+  }
   const muted = u.muted_until && u.muted_until.getTime() > Date.now() ? u.muted_until : null;
   const modNotice = u.warning ? { kind: 'warning' as const, message: u.warning, until: null }
     : muted ? { kind: 'muted' as const, message: 'You can’t send messages or post right now. You can still read everything.', until: muted.toISOString() } : null;
   return {
     id: u.id, handle: u.handle, displayName: u.display_name, initials: initialsOf(u.display_name), avatarColor: u.avatar_color, avatarUrl: u.avatar_url,
-    timezone: u.timezone, readReceipts: u.read_receipts, dmPolicy: u.dm_policy ?? 'everyone', bio: u.bio ?? null, isAdmin: admin, modNotice, notificationsEnabled: u.notifications_enabled, approved, companion, entitlements, chatStyle: style.style, quests,
+    timezone: u.timezone, readReceipts: u.read_receipts, dmPolicy: u.dm_policy ?? 'everyone', bio: u.bio ?? null, isAdmin: admin, modNotice, notificationsEnabled: u.notifications_enabled, approved, companion, entitlements: ent, chatStyle: style.style, quests,
   };
 }
 

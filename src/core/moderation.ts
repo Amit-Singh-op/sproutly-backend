@@ -37,6 +37,9 @@ type TargetType = ReportTarget;
 
 const adminLogins = new Set(config.ADMIN_EMAILS.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 
+/** Is this sign-in (email or phone) one of the moderators? */
+export const isAdminLogin = (login: string) => adminLogins.has(login.trim().toLowerCase());
+
 /** Is this account a moderator? (ADMIN_EMAILS on the server: the app can't make anyone one.) */
 export async function isAdmin(userId: string): Promise<boolean> {
   if (adminLogins.size === 0) return false;
@@ -52,6 +55,7 @@ async function adminIds(): Promise<string[]> {
 /** A push to every moderator (best effort). */
 function alertAdmins(title: string, body: string, ref: string) {
   void adminIds().then((ids) => {
+    if (ids.length === 0) log.error({ title, body }, 'moderation alert with no moderators: set ADMIN_EMAILS');
     for (const id of ids) {
       enqueue.push(`${ref}:${id}`, { kind: 'social', userId: id, title, body, data: { type: 'moderation' } }).catch(() => {});
     }
@@ -119,9 +123,26 @@ async function snapshot(type: TargetType, id: string): Promise<{ ownerId: string
         return { ownerId: g?.author_id ?? null, content: g ? { body: g.note, sticker: g.sticker, roomOwnerId: g.owner_id, postedAt: g.created_at } : {} };
       }
       case 'message': {
-        const m = await one<{ sender_id: string | null; conversation_id: string; type: string; body: string | null; payload: unknown; created_at: Date }>(
-          'SELECT sender_id, conversation_id, type, body, payload, created_at FROM messages WHERE id = $1', [id]);
-        return { ownerId: m?.sender_id ?? null, content: m ? { conversationId: m.conversation_id, type: m.type, body: m.body, payload: m.payload, sentAt: m.created_at } : {} };
+        const m = await one<{ sender_id: string | null; conversation_id: string; seq: number; type: string; body: string | null; payload: unknown; created_at: Date; deleted_at: Date | null }>(
+          'SELECT sender_id, conversation_id, seq, type, body, payload, created_at, deleted_at FROM messages WHERE id = $1', [id]);
+        if (!m) return { ownerId: null, content: {} };
+        // Deleted before the report (or its sender deleted their account): the private copy still has it.
+        const copy = m.deleted_at || !m.sender_id
+          ? await one<{ sender_id: string | null; body: string | null; payload: unknown }>('SELECT sender_id, body, payload FROM deleted_messages WHERE message_id = $1', [id])
+          : null;
+        // The conversation around it (10 before, 10 after), so a moderator sees the whole exchange.
+        const around = await q<{ seq: number; sender_id: string | null; handle: string | null; body: string | null; type: string; deleted_at: Date | null; copy: string | null; created_at: Date }>(
+          `SELECT x.seq, COALESCE(x.sender_id, d.sender_id) AS sender_id, u.handle, x.body, x.type, x.deleted_at, d.body AS copy, x.created_at
+             FROM messages x LEFT JOIN deleted_messages d ON d.message_id = x.id LEFT JOIN users u ON u.id = COALESCE(x.sender_id, d.sender_id)
+            WHERE x.conversation_id = $1 AND x.seq BETWEEN $2 - 10 AND $2 + 10 ORDER BY x.seq`, [m.conversation_id, m.seq]);
+        return {
+          ownerId: m.sender_id ?? copy?.sender_id ?? null,
+          content: {
+            conversationId: m.conversation_id, type: m.type, body: m.body ?? copy?.body ?? null, payload: m.payload ?? copy?.payload ?? null,
+            sentAt: m.created_at, ...(m.deleted_at ? { deletedAt: m.deleted_at } : {}),
+            context: around.map((x) => ({ seq: x.seq, senderId: x.sender_id, handle: x.handle, text: x.body ?? x.copy ?? `(${x.type})`, deleted: !!x.deleted_at, at: x.created_at, reported: x.seq === m.seq })),
+          },
+        };
       }
       case 'post': {
         const p = await one<{ user_id: string; caption: string | null; image_url: string | null; created_at: Date }>(
@@ -319,3 +340,32 @@ export function autoFlag(userId: string, targetType: TargetType, targetId: strin
     if (REPORT_CATEGORY_INFO[category].severity >= 4) alertAdmins('Flagged message', `${REPORT_CATEGORY_INFO[category].label}: open the moderation queue`, `modflag:${r?.id}`);
   })().catch((err) => log.warn({ err, userId }, 'auto flag failed'));
 }
+
+// ---------------- making sure serious reports are seen and answered ----------------
+
+/** Reporters hear back when a moderator acts on their report (they're never told what, or who it was about). */
+export async function thankReporters(reportIds: string[]) {
+  if (reportIds.length === 0) return;
+  const rows = await q<{ reporter_id: string }>(
+    'SELECT DISTINCT reporter_id FROM reports WHERE id = ANY($1::uuid[]) AND reporter_id IS NOT NULL', [reportIds]);
+  for (const r of rows) {
+    enqueue.push(`modthanks:${r.reporter_id}:${reportIds[0]}`, {
+      kind: 'social', userId: r.reporter_id, title: 'Thanks for your report',
+      body: 'We looked into it and took action. Thanks for helping keep Sproutly safe.', data: { type: 'moderation' },
+    }).catch(() => {});
+  }
+}
+
+/** Worker (every 15 min): urgent reports still open after 30 minutes re-alert moderators, at most every 2 hours each. */
+export async function remindUrgentReports() {
+  const due = await q<{ id: string; category: ReportCategory }>(
+    `UPDATE reports SET reminded_at = now()
+      WHERE id IN (SELECT id FROM reports WHERE status = 'open' AND category IN ('child_safety', 'violence', 'self_harm')
+                     AND created_at < now() - interval '30 minutes' AND (reminded_at IS NULL OR reminded_at < now() - interval '2 hours') LIMIT 50)
+      RETURNING id, category`);
+  if (due.length === 0) return;
+  const label = REPORT_CATEGORY_INFO[due[0]!.category].label;
+  alertAdmins('Urgent reports waiting', `${due.length} urgent ${due.length === 1 ? 'report' : 'reports'} (${label}${due.length > 1 ? ' and more' : ''}) still need review`,
+    `modremind:${new Date().toISOString().slice(0, 13)}`);
+}
+

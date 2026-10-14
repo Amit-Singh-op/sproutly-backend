@@ -7,6 +7,7 @@ import { isPlusMove, isPlusOutfit, isPlusPalette } from '../shared/rules.js';
 import type { Entitlements } from '../shared/types.js';
 import { peersOf, userStyleOf } from './users.js';
 import { isReviewLogin } from './review.js';
+import { isAdminLogin } from './moderation.js';
 
 const cacheKey = (userId: string) => `ent:${userId}`;
 
@@ -64,7 +65,7 @@ export async function applySubscription(userId: string, s: SubscriptionState, ev
   // The store-review account keeps Plus whatever the store says (it has no real purchase to report).
   if (!s.active) {
     const u = await one<{ login: string }>('SELECT login FROM users WHERE id = $1', [userId]);
-    if (isReviewLogin(u?.login)) return false;
+    if (isReviewLogin(u?.login) || (u?.login && isAdminLogin(u.login))) return false;
   }
   const changed = await tx(async (c) => {
     const cur = await one<{ last_event_ms: number; plus_active: boolean }>(

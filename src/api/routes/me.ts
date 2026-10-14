@@ -15,10 +15,10 @@ import { AnalyticsBody, recordEvents } from '../../core/analytics.js';
 import { addSong, removeSong, songsOfUser } from '../../core/music.js';
 import { clearWarning, requireNotMuted } from '../../core/moderation.js';
 import { isReservedName } from '../../shared/safety.js';
-import { autoFlag } from '../../core/moderation.js';
+import { autoFlag, isAdmin } from '../../core/moderation.js';
 
 const PatchMe = z.object({
-  displayName: z.string().trim().min(1).max(40).refine((n) => !isReservedName(n), 'That name is reserved. Please pick another one.').optional(),
+  displayName: z.string().trim().min(1).max(40).optional(),
   timezone: z.string().refine(isValidTimezone, 'Unknown timezone').optional(),
   readReceipts: z.boolean().optional(),
   dmPolicy: z.enum(['everyone', 'friends']).optional(),
@@ -49,6 +49,8 @@ export async function meRoutes(app: FastifyInstance) {
     const p = PatchMe.parse(req.body);
     const sets: string[] = [];
     const vals: unknown[] = [req.userId];
+    // Names that could pass for Sproutly staff are for moderators only.
+    if (p.displayName !== undefined && isReservedName(p.displayName) && !(await isAdmin(req.userId))) throw E.badRequest('That name is reserved. Please pick another one.');
     if (p.displayName !== undefined) { vals.push(p.displayName); sets.push(`display_name = $${vals.length}`); }
     if (p.timezone !== undefined) { vals.push(p.timezone); sets.push(`timezone = $${vals.length}`); }
     if (p.readReceipts !== undefined) { vals.push(p.readReceipts); sets.push(`read_receipts = $${vals.length}`); }

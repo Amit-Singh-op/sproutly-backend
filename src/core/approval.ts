@@ -4,13 +4,15 @@ import { AppError } from '../lib/errors.js';
 import { redis } from '../lib/redis.js';
 import { getAppConfig } from './appConfig.js';
 import { normalizeLogin } from './auth.js';
+import { isAdminLogin } from './moderation.js';
 
 const CACHE_S = 20; // an admin's approval shows up within ~20 s
 const key = (userId: string) => `appr:${userId}`;
 
 /**
  * Invite-only gate. A user may use the app when approval isn't required (app_config.approval_required = false),
- * when an admin set users.approved = true, or when it's the store-review account (reviewers must get in).
+ * when an admin set users.approved = true, when it's the store-review account (reviewers must get in), or when it's a
+ * moderator's account (ADMIN_EMAILS).
  */
 export async function isApproved(userId: string): Promise<boolean> {
   if (!(await getAppConfig()).approvalRequired) return true;
@@ -18,7 +20,8 @@ export async function isApproved(userId: string): Promise<boolean> {
   if (cached !== null) return cached === '1';
   const u = await one<{ approved: boolean; login: string }>('SELECT approved, login FROM users WHERE id = $1', [userId]);
   const review = !!u && !!config.REVIEW_EMAIL && u.login === normalizeLogin(config.REVIEW_EMAIL);
-  const ok = !!u && (u.approved || review);
+  // Moderators (ADMIN_EMAILS) never wait for approval.
+  const ok = !!u && (u.approved || review || isAdminLogin(u.login));
   await redis.set(key(userId), ok ? '1' : '0', 'EX', CACHE_S).catch(() => {});
   return ok;
 }
