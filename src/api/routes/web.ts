@@ -30,10 +30,10 @@ ${doc.sections.map(([h, b]) => `<h2>${esc(h)}</h2><p>${esc(b)}</p>`).join('\n')}
 
 const DELETE_PAGE = page('Delete your account', `
 <h1>Delete your Sproutly account</h1>
-<p class="muted">This permanently deletes your profile, companion, friends and friend requests, game scores and matches, posts and sessions. Messages you sent are wiped and show as "Message deleted" to others. This can't be undone.</p>
+<p class="muted">This permanently deletes your profile, bio, songs, companion, friends and friend requests, game scores and matches, posts and sessions. Messages you sent are wiped and show as "Message deleted" to others. This can't be undone.</p>
 <p style="margin-top:12px"><b>In the app:</b> Profile → Delete account.<br><b>Here:</b> confirm your email below.</p>
 <p class="muted" style="margin-top:12px">If you subscribed to Sproutly Plus, cancel it in Google Play (Payments &amp; subscriptions) as well; deleting your account doesn't cancel it.</p>
-<p class="muted" style="margin-top:12px">A suspended account can be deleted too. Records of reports and suspensions are kept for up to 2 years for safety (see the <a href="/privacy">Privacy Policy</a>), and a suspended email can't be used to sign up again while the suspension lasts.</p>
+<p class="muted" style="margin-top:12px">A suspended account can be deleted too. Records of reports, moderation actions and suspensions are kept for up to 2 years for safety, and a private copy of your messages for 14 days in case they are reported (see the <a href="/privacy">Privacy Policy</a>), and a suspended email can't be used to sign up again while the suspension lasts.</p>
 <div class="card">
   <label for="email"><b>Your account email</b></label>
   <input id="email" type="email" autocomplete="email" placeholder="you@mail.com">
@@ -71,7 +71,7 @@ const DELETE_DATA_PAGE = page('Delete your data', `
 • <b>A saved look:</b> Closet → My looks → save over it with a different outfit.</p>
 </div>
 <h2>Deleted automatically</h2>
-<p>Chat messages are deleted from our servers after 3 days. Stories are deleted after 24 hours. Show off posts leave the feed after 72 hours.</p>
+<p>Chat messages are deleted from our servers after 3 days (a message you delete is kept privately for 14 days, only for moderators looking into a report). Stories are deleted after 24 hours. Show off posts leave the feed after 72 hours.</p>
 <h2>Anything else</h2>
 <p>To ask us to delete any other data about you, email <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> from your account email and say what you'd like removed. We'll reply within 30 days.</p>
 <p class="muted" style="margin-top:20px">Want to delete everything? <a href="/delete-account">Delete your whole account</a>.</p>`);
@@ -90,14 +90,15 @@ const CHILD_SAFETY_PAGE = page('Child safety standards', `
 • Sexualising minors in any way, or sharing, requesting or trading CSAM.
 • Using Sproutly to arrange meeting a minor for sexual purposes, or trafficking.</p>
 <h2>How we prevent it</h2>
-<p>• Anyone can report a user, message, story, post or comment from inside the app. Content reported by several people is hidden automatically while we review it.
+<p>• Anyone can report a user, message, story, post, comment or guestbook note from inside the app, choosing a reason such as Child safety. Content reported by several people is hidden automatically while we review it.
 • Anyone can block another user, which stops all contact and hides their content.
-• An account reported by several different people within a few days is suspended automatically while we review it: it is signed out at once, cannot sign in, and its email cannot be used to sign up again.
-• When something is reported we keep a copy of it, even if it is later deleted, so reviews and reports to the authorities have the evidence they need.
+• Child-safety reports alert our moderators immediately and keep reminding them until someone has reviewed them. An account reported for child safety or threats by two established accounts is put on hold at once (it can no longer send messages or post) until a moderator decides.
+• A short automatic check flags unmistakable sexual requests and grooming patterns (for example asking a child’s age together with requests for photos) for a moderator to review.
+• When something is reported we keep a copy of it, even if it is later deleted, together with the messages around it, so reviews and reports to the authorities have the evidence they need. Messages deleted by their sender are also kept privately for 14 days for this purpose.
 • Messages are limited in rate to prevent spam, and chat messages are deleted from our servers after 3 days.
 • We review reports and act on them promptly.</p>
 <h2>What we do when we find it</h2>
-<p>• We remove the content and permanently ban the accounts involved (they are signed out immediately and cannot return with the same email).
+<p>• We remove the content and permanently ban the accounts involved (they are signed out immediately and cannot return with the same email or on the same device).
 • We preserve the relevant information as required by law.
 • We report apparent CSAM to the National Center for Missing &amp; Exploited Children (NCMEC) and to the relevant regional and national authorities, and we cooperate with law enforcement.</p>
 <h2>How to report</h2>
