@@ -28,6 +28,31 @@ The doc suggests a multi-package repo (`services/*`, `packages/*`). This is one 
 
 ## Payments (RevenueCat)
 
+**Plus is "Coming soon".** The app (from 0.1.5) has `PLUS_ON_SALE = false` in `src/content.ts`: no prices, trials or restore are shown, and the app ignores `plus_enabled` in `app_config`. Turning that flag on in the database does nothing until a new app build ships with `PLUS_ON_SALE = true`.
+
+**Giving Plus to someone by hand** (works while Plus is coming soon; they get every Plus feature):
+
+```sql
+-- forever (until you switch it off)
+INSERT INTO entitlements (user_id, plus_active, updated_at)
+SELECT id, TRUE, now() FROM users WHERE login = 'their@email.com'
+ON CONFLICT (user_id) DO UPDATE SET plus_active = TRUE, updated_at = now();
+
+-- or for a set time: also add a subscription row; the hourly expiry job ends it a day after the date
+INSERT INTO subscriptions (user_id, product_id, status, period, trial, current_period_end, plus_since, store, will_renew, updated_at)
+SELECT id, 'manual_plus', 'active', 'monthly', FALSE, now() + interval '30 days', now(), 'manual', FALSE, now() FROM users WHERE login = 'their@email.com'
+ON CONFLICT (user_id) DO UPDATE SET status = 'active', current_period_end = EXCLUDED.current_period_end, store = 'manual', updated_at = now();
+
+-- if they lost Plus before, let them write in Plus-only groups again (the upgrade job does this for store purchases)
+UPDATE conversation_members m SET read_only = FALSE FROM conversations c
+ WHERE c.id = m.conversation_id AND c.plus_only AND m.user_id = (SELECT id FROM users WHERE login = 'their@email.com');
+
+-- take it away
+UPDATE entitlements SET plus_active = FALSE, updated_at = now() WHERE user_id = (SELECT id FROM users WHERE login = 'their@email.com');
+```
+
+The app picks it up within about a minute (Plus is cached in Redis for 60 s), the next time it loads their profile. `/purchases/sync` keeps a hand-made grant (no subscription row, or store `manual`) even though RevenueCat has no purchase for that person. Switching rows by hand skips the upgrade/downgrade job (hence the `read_only` line above; taking Plus away by hand leaves their Plus outfit/character on until they change it).
+
 - Products `plus_monthly` ($5) and `plus_yearly` ($50), entitlement `plus`, offering `default`. The app uses our user id as `appUserID`.
 - Webhook: point RevenueCat at `POST /v1/webhooks/revenuecat` with the Authorization header set to `REVENUECAT_WEBHOOK_AUTH`. Events are deduplicated by id and ordered by timestamp.
 - `POST /v1/purchases/sync`: the app calls this right after a purchase/restore; the server reads the subscriber from RevenueCat's REST API (needs `REVENUECAT_SECRET_KEY`) so Plus unlocks without waiting for the webhook.

@@ -182,14 +182,17 @@ export async function syncFromRevenueCat(userId: string) {
   const now = Date.now();
   let state: SubscriptionState;
   if (!ent) {
-    // Check if active subscription already in db
-    const cur = await one<{ plus_active: boolean; current_period_end: Date | null; period: 'monthly' | 'yearly' | null; product_id: string | null }>(
-      `SELECT e.plus_active, s.current_period_end, s.period, s.product_id
+    // RevenueCat knows of no purchase. Keep Plus that wasn't bought through the store: a period that hasn't ended yet,
+    // or Plus switched on by hand in the database (no subscription row, or store 'manual'). Only a store purchase
+    // that RevenueCat no longer reports is switched off here.
+    const cur = await one<{ plus_active: boolean; current_period_end: Date | null; has_sub: boolean; store: string | null }>(
+      `SELECT e.plus_active, s.current_period_end, (s.user_id IS NOT NULL) AS has_sub, s.store
          FROM entitlements e LEFT JOIN subscriptions s ON s.user_id = e.user_id
         WHERE e.user_id = $1`,
       [userId]
     );
-    if (cur?.plus_active && cur.current_period_end && cur.current_period_end.getTime() > now) {
+    const manual = !!cur && (!cur.has_sub || cur.store === 'manual');
+    if (cur?.plus_active && (manual || (cur.current_period_end && cur.current_period_end.getTime() > now))) {
       return getEntitlements(userId);
     }
     state = { active: false, productId: null, period: null, status: 'none', trial: false, currentPeriodEnd: null, willRenew: false, billingIssueAt: null, store: null, purchasedAt: null };
