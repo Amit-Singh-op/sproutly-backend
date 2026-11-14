@@ -278,6 +278,7 @@ export async function suspendUser(userId: string, reason: string, actor: string,
   if (!u) throw new Error('No such user');
   await q(`INSERT INTO banned_logins (login, reason, until) VALUES ($1, $2, $3) ON CONFLICT (login) DO UPDATE SET reason = EXCLUDED.reason, until = EXCLUDED.until`, [u.login, why, until]);
   await q('UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [userId]);
+  await q('DELETE FROM devices WHERE user_id = $1', [userId]);
   await redis.del(`susp:${userId}`).catch(() => {});
   // A permanent ban also covers the app installs this account used, so a new email on the same phone won't work.
   if (!until) await q(`INSERT INTO banned_devices (device_id, user_id, reason) SELECT device_id, user_id, $2 FROM user_devices WHERE user_id = $1 ON CONFLICT (device_id) DO NOTHING`, [userId, why]);

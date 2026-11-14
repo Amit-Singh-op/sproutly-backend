@@ -31,12 +31,26 @@ async function totalUnread(userId: string): Promise<number> {
   return r?.n ?? 0;
 }
 
+/**
+ * The user's phones that are still signed in: the session the token was registered under is alive (older rows
+ * without a session need any live session of the user). Signed out, expired or suspended -> not here, even if the
+ * app never removed its token.
+ */
+export function liveDevices(userId: string) {
+  return q<{ id: string; push_token: string; platform: string }>(
+    `SELECT d.id, d.push_token, d.platform FROM devices d
+      WHERE d.user_id = $1 AND EXISTS (
+        SELECT 1 FROM refresh_tokens r
+         WHERE r.user_id = d.user_id AND r.revoked_at IS NULL AND r.expires_at > now()
+           AND (d.session_family IS NULL OR r.family = d.session_family))`, [userId]);
+}
+
 /** FCM HTTP v1 to every device of the user (Android + iOS via the APNs key in FCM). Dead tokens are removed. */
 async function sendToUser(userId: string, p: Push) {
   // Settings → Notifications off: nothing reaches any of this user's devices.
   const pref = await one<{ on: boolean }>('SELECT notifications_enabled AS on FROM users WHERE id = $1', [userId]);
   if (!pref?.on) return;
-  const devices = await q<{ id: string; push_token: string; platform: string }>('SELECT id, push_token, platform FROM devices WHERE user_id = $1', [userId]);
+  const devices = await liveDevices(userId);
   if (devices.length === 0) return;
   const badge = await totalUnread(userId);
   if (!auth) {

@@ -151,7 +151,7 @@ async function issueTokens(userId: string, family: string = randomUUID()): Promi
     'INSERT INTO refresh_tokens (user_id, family, token_hash, expires_at) VALUES ($1,$2,$3,$4)',
     [userId, family, sha256(refreshToken), new Date(Date.now() + config.refreshTtlS * 1000)],
   );
-  return { accessToken: await signAccess(userId), refreshToken, expiresIn: config.accessTtlS };
+  return { accessToken: await signAccess(userId, family), refreshToken, expiresIn: config.accessTtlS };
 }
 
 /** Each refresh marks the old token used and issues a new one in the same family. Reusing a used token revokes the family. */
@@ -165,6 +165,7 @@ export async function refresh(refreshToken: string): Promise<Tokens> {
     if (t.used_at) {
       // Theft detection: someone presented a token that was already rotated.
       await q('UPDATE refresh_tokens SET revoked_at = now() WHERE family = $1 AND revoked_at IS NULL', [t.family], c);
+      await q('DELETE FROM devices WHERE session_family = $1', [t.family], c);
       log.warn({ userId: t.user_id, family: t.family }, 'refresh token reuse: family revoked');
       return 'reused' as const;
     }
@@ -175,9 +176,13 @@ export async function refresh(refreshToken: string): Promise<Tokens> {
   return issueTokens(out.userId, out.family);
 }
 
-export async function logout(refreshToken: string) {
-  const t = await one<{ family: string }>('SELECT family FROM refresh_tokens WHERE token_hash = $1', [sha256(refreshToken)]);
-  if (t) await pool.query('UPDATE refresh_tokens SET revoked_at = now() WHERE family = $1 AND revoked_at IS NULL', [t.family]);
+/** Ends this sign-in session, and this phone stops getting the account's pushes (its token and the session's). */
+export async function logout(refreshToken: string, pushToken?: string) {
+  const t = await one<{ family: string; user_id: string }>('SELECT family, user_id FROM refresh_tokens WHERE token_hash = $1', [sha256(refreshToken)]);
+  if (!t) return;
+  await pool.query('UPDATE refresh_tokens SET revoked_at = now() WHERE family = $1 AND revoked_at IS NULL', [t.family]);
+  await pool.query('DELETE FROM devices WHERE session_family = $1', [t.family]);
+  if (pushToken) await pool.query('DELETE FROM devices WHERE user_id = $1 AND push_token = $2', [t.user_id, pushToken]);
 }
 
 // ---------------- Apple / Google ----------------

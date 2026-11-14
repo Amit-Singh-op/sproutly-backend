@@ -6,7 +6,7 @@ import { config } from '../config.js';
 import { AppError, GENERIC_MESSAGE, publicHttpMessage, publicValidationMessage } from '../lib/errors.js';
 import { getAppConfig } from '../core/appConfig.js';
 import { requireApproved } from '../core/approval.js';
-import { verifyAccess } from '../lib/jwt.js';
+import { verifyAccessClaims } from '../lib/jwt.js';
 import { actionGate } from '../lib/actionLimits.js';
 import { requireNotSuspended } from '../core/suspension.js';
 import { log } from '../lib/log.js';
@@ -24,13 +24,15 @@ import { deviceIdOf, recordClient } from '../core/moderation.js';
 import { cloudinaryHookRoutes } from './routes/cloudinaryHook.js';
 
 declare module 'fastify' {
-  interface FastifyRequest { userId: string }
+  interface FastifyRequest { userId: string; sessionId: string | null }
 }
 
 /** Every route except /auth/* and /webhooks/* needs a Bearer JWT. */
 export async function authenticate(req: FastifyRequest) {
   const h = req.headers.authorization;
-  req.userId = await verifyAccess(h?.startsWith('Bearer ') ? h.slice(7) : null);
+  const claims = await verifyAccessClaims(h?.startsWith('Bearer ') ? h.slice(7) : null);
+  req.userId = claims.userId;
+  req.sessionId = claims.sessionId;
 }
 
 /** What a signed-in but not-yet-approved user may still do: see their status, delete their account, register push. */
@@ -51,6 +53,7 @@ async function suspensionGate(req: FastifyRequest) {
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({ loggerInstance: log as unknown as FastifyBaseLogger, trustProxy: true, bodyLimit: 256 * 1024 });
   app.decorateRequest('userId', '');
+  app.decorateRequest('sessionId', null);
   // Treat an empty JSON body as "no body" instead of rejecting it: DELETE/POST requests without a payload that
   // still send Content-Type: application/json (e.g. un-voting a poll from older app builds) must keep working.
   app.removeContentTypeParser('application/json');

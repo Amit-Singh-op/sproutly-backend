@@ -88,7 +88,7 @@ export async function meRoutes(app: FastifyInstance) {
 
   app.post('/devices', async (req) => {
     const d = Device.parse(req.body);
-    await registerDevice(req.userId, d.platform, d.pushToken, d.appVersion);
+    await registerDevice(req.userId, d.platform, d.pushToken, d.appVersion, req.sessionId);
     return { ok: true };
   });
 

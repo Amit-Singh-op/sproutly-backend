@@ -9,13 +9,14 @@ import { REPORT_CATEGORY_INFO, type ReportCategory, type ReportTarget } from '..
 /** Reports one person can file a day. */
 const REPORTS_PER_DAY = 20;
 
-export async function registerDevice(userId: string, platform: 'ios' | 'android', pushToken: string, appVersion?: string) {
+export async function registerDevice(userId: string, platform: 'ios' | 'android', pushToken: string, appVersion?: string, sessionId: string | null = null) {
   // A push token belongs to one account at a time (shared phones / sign-out -> sign-in as someone else).
   await q('DELETE FROM devices WHERE push_token = $1 AND user_id <> $2', [pushToken, userId]);
   await q(
-    `INSERT INTO devices (user_id, platform, push_token, app_version) VALUES ($1,$2,$3,$4)
-     ON CONFLICT (user_id, push_token) DO UPDATE SET platform = EXCLUDED.platform, app_version = EXCLUDED.app_version, last_active_at = now()`,
-    [userId, platform, pushToken, appVersion ?? null],
+    `INSERT INTO devices (user_id, platform, push_token, app_version, session_family) VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (user_id, push_token) DO UPDATE SET platform = EXCLUDED.platform, app_version = EXCLUDED.app_version,
+       session_family = COALESCE(EXCLUDED.session_family, devices.session_family), last_active_at = now()`,
+    [userId, platform, pushToken, appVersion ?? null, sessionId],
   );
 }
 

@@ -8,6 +8,7 @@ const Login = z.object({ phoneOrEmail: z.string().min(3).max(200) });
 const Verify = Login.extend({ code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code'), displayName: z.string().max(40).optional(), timezone: z.string().max(64).optional() });
 const Provider = z.object({ idToken: z.string().min(10), displayName: z.string().max(40).optional(), timezone: z.string().max(64).optional() });
 const Refresh = z.object({ refreshToken: z.string().min(10) });
+const Logout = Refresh.extend({ pushToken: z.string().min(10).max(4096).optional() });
 
 /** An app install an account was banned on can't sign in or create a new account (any email). */
 async function deviceGate(req: FastifyRequest) {
@@ -35,7 +36,8 @@ export async function authRoutes(app: FastifyInstance) {
   });
   app.post('/auth/refresh', async (req) => refresh(Refresh.parse(req.body).refreshToken));
   app.post('/auth/logout', async (req) => {
-    await logout(Refresh.parse(req.body).refreshToken);
+    const b = Logout.parse(req.body);
+    await logout(b.refreshToken, b.pushToken);
     return { ok: true };
   });
 }
