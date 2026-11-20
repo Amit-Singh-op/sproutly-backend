@@ -10,7 +10,7 @@ import { isValidTimezone } from '../lib/time.js';
 import { RATE_LIMITS } from '../shared/rules.js';
 import { otpEmail } from './emailTemplate.js';
 import { emailConfigured, sendEmail } from './mail.js';
-import { notifyApprovalNeeded, type SignInMethod } from './approvalEmail.js';
+import { scheduleApprovalEmail, type SignInMethod } from './approvalEmail.js';
 import { createUser } from './users.js';
 import { requireNotSuspended } from './suspension.js';
 import { bannedLogin, recordBlockedSignIn } from './moderation.js';
@@ -108,8 +108,8 @@ async function signInLogin(login: string, method: SignInMethod, displayName?: st
   // The store-review account always has Plus (reviewers must be able to see every feature).
   if (isReviewLogin(login)) { await ensureReviewPlus(userId); await invalidatePlus(userId); }
   const tokens = await issueTokens(userId);
-  // Invite-only: tell the moderators someone new is waiting (in the background; signing up doesn't wait for it).
-  if (isNew) void notifyApprovalNeeded(userId, method);
+  // Invite-only: tell the moderators someone new is waiting, once they've finished signing up (see approvalEmail.ts).
+  if (isNew) await scheduleApprovalEmail(userId, login, method, !!displayName?.trim());
   return { ...tokens, isNew };
 }
 

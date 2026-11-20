@@ -43,9 +43,9 @@ async function call(method: string, path: string, token?: string, body?: unknown
   const text = await res.text();
   return { status: res.status, body: text ? JSON.parse(text) : null };
 }
-async function signUp(email: string, name: string) {
+async function signUp(email: string, name?: string) {
   const s = await call('POST', '/auth/otp/start', undefined, { phoneOrEmail: email });
-  const v = await call('POST', '/auth/otp/verify', undefined, { phoneOrEmail: email, code: s.body.devCode, displayName: name, timezone: 'Asia/Kolkata' });
+  const v = await call('POST', '/auth/otp/verify', undefined, { phoneOrEmail: email, code: s.body.devCode, ...(name && { displayName: name }), timezone: 'Asia/Kolkata' });
   const me = await call('GET', '/me', v.body.accessToken);
   return { access: v.body.accessToken as string, id: me.body.id as string, isNew: v.body.isNew as boolean };
 }
@@ -56,6 +56,21 @@ const postApprove = (t: string) => page(`${BASE}/approve`, { method: 'POST', hea
 async function main() {
   await q(`INSERT INTO app_config (key, value) VALUES ('approval_required', 'true') ON CONFLICT (key) DO UPDATE SET value = 'true'`);
   clearAppConfigCache();
+
+  console.log('the email waits until signing up is finished');
+  const jobOf = (id: string) => queue('maintenance').getJob(`approval-email_${id}`);
+  const n = await signUp(`named-${randomUUID().slice(0, 8)}@example.com`);
+  const j1 = await jobOf(n.id);
+  check('after the code step (no name yet) the email is waiting, not sent', !!j1 && (await j1.isDelayed()), await j1?.getState());
+  check('it waits at most 3 minutes', !!j1 && j1.opts.delay === 3 * 60 * 1000, j1?.opts.delay);
+  check('the email is for the moderators: the job only knows who signed up, not where to send', JSON.stringify(Object.keys(j1!.data).sort()) === '["method","userId"]');
+  await call('PATCH', '/me', n.access, { displayName: 'Kabir' });
+  let state = '';
+  for (let i = 0; i < 50 && state !== 'completed'; i++) { await new Promise((r) => setTimeout(r, 100)); state = await (await jobOf(n.id))!.getState(); }
+  check('choosing their name sends it right away', state === 'completed', state);
+  const named = await signUp(`given-${randomUUID().slice(0, 8)}@example.com`, 'Given Name');
+  const j2 = await jobOf(named.id);
+  check('a sign-in that already carries the name (Apple/Google) sends it right away', !!j2 && !j2.opts.delay, j2?.opts.delay);
 
   console.log('a new person signs up while approval is required');
   const email = `wait-${randomUUID().slice(0, 8)}@example.com`;

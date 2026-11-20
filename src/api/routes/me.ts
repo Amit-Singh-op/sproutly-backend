@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { signupFinished } from '../../core/approvalEmail.js';
 import { q } from '../../db/pool.js';
 import { getMe, peersOf, userStyleOf, userStyles } from '../../core/users.js';
 import { registerDevice, report } from '../../core/misc.js';
@@ -64,6 +65,8 @@ export async function meRoutes(app: FastifyInstance) {
       vals.push(p.avatarUrl); sets.push(`avatar_url = $${vals.length}`);
     }
     if (sets.length) await q(`UPDATE users SET ${sets.join(', ')} WHERE id = $1`, vals);
+    // A new sign-up chose their name: that's the end of signing up, so the approval email can go now.
+    if (p.displayName !== undefined) await signupFinished(req.userId);
     if (p.displayName !== undefined || p.avatarUrl !== undefined) {
       const style = await userStyleOf(req.userId);
       if (style) toUsers([...(await peersOf(req.userId)), req.userId], 'style:update', style);

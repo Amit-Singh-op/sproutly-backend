@@ -6,6 +6,8 @@ import { queue, type EntitlementJob, type FanoutJob, type PushJob, type QuestJob
 import { cleanup, purgeOldMessages, expireLapsedSubscriptions, handleEntitlement, handleFanout, handleQuest, streakResets, weeklyTop } from './jobs.js';
 import { handlePush } from './push.js';
 import { remindUrgentReports } from '../core/moderation.js';
+import { notifyApprovalNeeded } from '../core/approvalEmail.js';
+import type { ApprovalEmailJob } from '../lib/queues.js';
 
 const workers = [
   new Worker<PushJob>('push', (j) => handlePush(j.data), { connection: bullConnection(), concurrency: 20 }),
@@ -20,6 +22,7 @@ const workers = [
       case 'cleanup': return cleanup();
       case 'purge-messages': return purgeOldMessages();
       case 'mod-reminders': return remindUrgentReports();
+      case 'approval-email': { const d = j.data as ApprovalEmailJob; return notifyApprovalNeeded(d.userId, d.method); }
     }
   }, { connection: bullConnection(), concurrency: 1 }),
 ];

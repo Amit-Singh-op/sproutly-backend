@@ -33,6 +33,8 @@ export type PushJob =
 export type QuestJob = { kind: 'message.sent'; messageId: string } | { kind: 'room.visit'; ownerId: string; visitorId: string };
 export type FanoutJob = { postId: string };
 export type EntitlementJob = { userId: string; reason: 'upgrade' | 'downgrade' };
+/** Email the moderators that a new sign-up is waiting for approval (see core/approvalEmail.ts). */
+export type ApprovalEmailJob = { userId: string; method: 'email' | 'phone' | 'apple' | 'google' };
 
 /** BullMQ rejects custom job ids containing ":" (its key separator). */
 const jobId = (id: string) => id.replace(/:/g, '_');
@@ -42,4 +44,7 @@ export const enqueue = {
   quests: (id: string, data: QuestJob) => queue('quests').add(data.kind, data, { jobId: jobId(id) }),
   fanout: (data: FanoutJob) => queue('showcase-fanout').add('fanout', data, { jobId: jobId(`fanout:${data.postId}`) }),
   entitlement: (id: string, data: EntitlementJob) => queue('entitlement-sync').add(data.reason, data, { jobId: jobId(id) }),
+  approvalEmail: (data: ApprovalEmailJob, delayMs: number) =>
+    queue('maintenance').add('approval-email', data, { jobId: approvalEmailJobId(data.userId), delay: delayMs }),
 };
+export const approvalEmailJobId = (userId: string) => jobId(`approval-email:${userId}`);
