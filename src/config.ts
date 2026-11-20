@@ -49,6 +49,10 @@ const Env = z.object({
   CLOUDINARY_MODERATION: z.string().optional(),
   // This server's public https address, for Cloudinary to send scan results to (e.g. https://api.sproutly.app).
   PUBLIC_API_URL: z.string().url().optional(),
+  // Render sets this to the service's public https address; used when PUBLIC_API_URL isn't set.
+  RENDER_EXTERNAL_URL: z.string().url().optional(),
+  // Who gets the "someone is waiting for approval" email (comma-separated). Empty = the ADMIN_EMAILS.
+  APPROVAL_EMAILS: z.string().default(''),
 });
 
 // Blank values (e.g. "GMAIL_USER=") mean unset, not an invalid email/url.
@@ -66,6 +70,8 @@ export const config = {
   isProd: e.NODE_ENV === 'production',
   // The dev OTP is never honoured in production, even if set.
   otpDevCode: e.NODE_ENV === 'production' ? undefined : e.OTP_DEV_CODE,
+  /** This server's public address without a trailing slash (links in emails), or undefined if unknown. */
+  publicUrl: (e.PUBLIC_API_URL ?? e.RENDER_EXTERNAL_URL)?.replace(/\/+$/, ''),
   googleAudiences: e.GOOGLE_AUDIENCES.split(',').map((s) => s.trim()).filter(Boolean),
   accessTtlS: 15 * 60,
   refreshTtlS: 30 * 24 * 60 * 60,

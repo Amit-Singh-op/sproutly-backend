@@ -26,6 +26,24 @@ The doc suggests a multi-package repo (`services/*`, `packages/*`). This is one 
 4. `npm run dev` (all three services in one process), or `dev:api` / `dev:realtime` / `dev:worker` separately.
 5. In the app's `.env`: `EXPO_PUBLIC_API_URL=http://<host>:4000/v1`, `EXPO_PUBLIC_RT_URL=http://<host>:4001`, plus the RevenueCat public keys.
 
+## Invite-only access
+
+While `approval_required` is `true` in `app_config`, new accounts can't use the app until they're approved (moderators in `ADMIN_EMAILS` and the store-review account never wait).
+
+**Approval emails.** Each time someone new signs up and has to wait, the moderators get an email saying who it is (name, username, email or phone, Apple/Google, sign-up time, time zone, account id) with an **Approve** button. The button opens a page on this server that shows the person again and approves them with one more tap (mail scanners open links by themselves, so opening the link alone approves nobody). They can use the app straight away and get a "You're in!" notification. The link works for 30 days.
+
+- Sent to `APPROVAL_EMAILS` (comma-separated), or to `ADMIN_EMAILS` when that's empty. Uses the same email service as sign-in codes (`RESEND_API_KEY` or Gmail).
+- The button needs this server's public address: `PUBLIC_API_URL`, or on Render the automatic `RENDER_EXTERNAL_URL`. Without either, the email shows the SQL to run instead.
+- No email when approval is switched off, or for moderators and the review account.
+
+By hand:
+
+```sql
+SELECT id, login, display_name, created_at FROM users WHERE NOT approved ORDER BY created_at;   -- waiting
+UPDATE users SET approved = true, approved_at = now() WHERE login = 'their@email.com';           -- approve
+UPDATE app_config SET value = 'false' WHERE key = 'approval_required';                           -- open to everyone
+```
+
 ## Payments (RevenueCat)
 
 **Plus is "Coming soon".** The app (from 0.1.5) has `PLUS_ON_SALE = false` in `src/content.ts`: no prices, trials or restore are shown, and the app ignores `plus_enabled` in `app_config`. Turning that flag on in the database does nothing until a new app build ships with `PLUS_ON_SALE = true`.

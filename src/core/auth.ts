@@ -1,6 +1,5 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
-import nodemailer from 'nodemailer';
 import { config } from '../config.js';
 import { one, pool, q, tx } from '../db/pool.js';
 import { AppError, E } from '../lib/errors.js';
@@ -10,6 +9,8 @@ import { limit } from '../lib/ratelimit.js';
 import { isValidTimezone } from '../lib/time.js';
 import { RATE_LIMITS } from '../shared/rules.js';
 import { otpEmail } from './emailTemplate.js';
+import { emailConfigured, sendEmail } from './mail.js';
+import { notifyApprovalNeeded, type SignInMethod } from './approvalEmail.js';
 import { createUser } from './users.js';
 import { requireNotSuspended } from './suspension.js';
 import { bannedLogin, recordBlockedSignIn } from './moderation.js';
@@ -35,44 +36,11 @@ export function normalizeLogin(raw: string): string {
 }
 
 // ---------------- OTP delivery ----------------
-// Gmail SMTP (smtp.gmail.com:465) authenticated with a Google App Password.
-// Fail fast: a blocked or slow SMTP port must not hang the sign-in request.
-// (Timeouts must be transport options; nodemailer's second createTransport argument is only message defaults.)
-const mailer = config.GMAIL_USER && config.GMAIL_APP_PASSWORD
-  ? nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      // App passwords are shown with spaces ("abcd efgh ..."); Google accepts them without.
-      auth: { user: config.GMAIL_USER, pass: config.GMAIL_APP_PASSWORD.replace(/\s+/g, '') },
-      connectionTimeout: 10_000,
-      greetingTimeout: 10_000,
-      socketTimeout: 15_000,
-    })
-  : null;
-// Gmail rewrites any From address that isn't the account or a verified alias, so default to the account itself.
-const otpFrom = config.OTP_FROM ?? (config.GMAIL_USER ? `Sproutly <${config.GMAIL_USER}>` : undefined);
-
-/**
- * Resend HTTPS API (port 443). Preferred when RESEND_API_KEY is set: hosts like Render's free tier block
- * outbound SMTP ports, where the SMTP transport just times out. OTP_FROM must be on a domain verified in Resend.
- */
-async function sendViaResend(to: string, subject: string, text: string, html: string) {
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${config.RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: otpFrom, to: [to], subject, text, html, ...(config.OTP_REPLY_TO && { reply_to: config.OTP_REPLY_TO }) }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) throw new Error(`Resend API ${res.status}: ${(await res.text()).slice(0, 300)}`);
-}
-
 async function deliverOtp(login: string, code: string) {
   const { subject, text, html } = otpEmail(code);
-  if (login.includes('@') && (config.RESEND_API_KEY || mailer)) {
+  if (login.includes('@') && emailConfigured()) {
     try {
-      if (config.RESEND_API_KEY) await sendViaResend(login, subject, text, html);
-      else await mailer!.sendMail({ from: otpFrom, to: login, subject, text, html, replyTo: config.OTP_REPLY_TO });
+      await sendEmail({ to: [login], subject, text, html, replyTo: config.OTP_REPLY_TO });
     } catch (err) {
       log.error({ err }, 'OTP email failed');
       throw E.unavailable('OTP_UNAVAILABLE', 'We couldn’t send the code right now. Please try again in a moment.');
@@ -122,10 +90,10 @@ export async function verifyOtp(raw: string, code: string, displayName?: string,
     throw new AppError(400, 'OTP_INVALID', 'That code isn’t right');
   }
   await q('DELETE FROM otp_codes WHERE login = $1', [login]);
-  return signInLogin(login, displayName, timezone);
+  return signInLogin(login, login.includes('@') ? 'email' : 'phone', displayName, timezone);
 }
 
-async function signInLogin(login: string, displayName?: string, timezone?: string): Promise<Tokens> {
+async function signInLogin(login: string, method: SignInMethod, displayName?: string, timezone?: string): Promise<Tokens> {
   const banned = await bannedLogin(login);
   if (banned) { await recordBlockedSignIn(login, null); throw new AppError(403, 'ACCOUNT_SUSPENDED', banned); }
   const tz = timezone && isValidTimezone(timezone) ? timezone : undefined;
@@ -139,7 +107,10 @@ async function signInLogin(login: string, displayName?: string, timezone?: strin
   });
   // The store-review account always has Plus (reviewers must be able to see every feature).
   if (isReviewLogin(login)) { await ensureReviewPlus(userId); await invalidatePlus(userId); }
-  return { ...(await issueTokens(userId)), isNew };
+  const tokens = await issueTokens(userId);
+  // Invite-only: tell the moderators someone new is waiting (in the background; signing up doesn't wait for it).
+  if (isNew) void notifyApprovalNeeded(userId, method);
+  return { ...tokens, isNew };
 }
 
 // ---------------- refresh tokens (rotating families) ----------------
@@ -206,5 +177,5 @@ export async function signInWithProvider(provider: 'apple' | 'google', idToken: 
   const verified = payload.email_verified === true || payload.email_verified === 'true';
   const login = payload.email && verified ? payload.email.toLowerCase() : `${provider}:${payload.sub}`;
   if (!payload.sub) throw E.unauthorized('Could not verify that sign-in');
-  return signInLogin(login, displayName, timezone);
+  return signInLogin(login, provider, displayName, timezone);
 }

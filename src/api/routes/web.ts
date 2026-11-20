@@ -1,6 +1,9 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { deleteAccountWithCode } from '../../core/account.js';
+import { approveUser } from '../../core/approval.js';
+import { contactOf, formatTime, verifyApproveLink } from '../../core/approvalEmail.js';
+import { one } from '../../db/pool.js';
 import { CONTACT_EMAIL, LEGAL_UPDATED, PRIVACY, TERMS, type LegalDoc } from '../../shared/legal.js';
 
 /** Public web pages for the store listing: privacy policy, terms, and the account-deletion page Play requires. */
@@ -76,6 +79,34 @@ const DELETE_DATA_PAGE = page('Delete your data', `
 <p>To ask us to delete any other data about you, email <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> from your account email and say what you'd like removed. We'll reply within 30 days.</p>
 <p class="muted" style="margin-top:20px">Want to delete everything? <a href="/delete-account">Delete your whole account</a>.</p>`);
 
+// ---------------- Approve page (the button in the "someone is waiting" email) ----------------
+type Pending = { id: string; login: string; display_name: string; handle: string; timezone: string; created_at: Date; approved: boolean; suspended_at: Date | null };
+const loadPending = (id: string) =>
+  one<Pending>('SELECT id, login, display_name, handle, timezone, created_at, approved, suspended_at FROM users WHERE id = $1', [id]);
+
+function personCard(u: Pending) {
+  const rows: [string, string][] = [
+    ['Name', u.display_name], ['Username', `@${u.handle}`], ['Signed in with', contactOf(u.login)],
+    ['Signed up', formatTime(u.created_at, u.timezone)], ['Account id', u.id],
+  ];
+  return `<div class="card" style="margin-top:16px">${rows.map(([k, v]) => `<div><span class="muted">${esc(k)}:</span> ${esc(v)}</div>`).join('')}</div>`;
+}
+
+const approveMessage = (title: string, text: string, ok = false) =>
+  page(title, `<h1>${esc(title)}</h1><p class="${ok ? 'ok' : 'muted'}" style="margin-top:12px">${esc(text)}</p>`);
+const BAD_LINK = approveMessage('Link not valid', 'This approve link has expired or isn’t valid. Approve them in the database instead (see “Invite-only access” in the backend README).');
+const GONE = approveMessage('Account not found', 'This account doesn’t exist any more. They may have deleted it.');
+
+function approvePage(u: Pending, token: string) {
+  if (u.approved) return page('Already approved', `<h1>Already approved</h1><p class="ok" style="margin-top:12px">${esc(u.display_name)} can already use Sproutly.</p>${personCard(u)}`);
+  const suspended = u.suspended_at ? `<p class="err" style="margin-top:12px">This account is suspended. Approving won’t let them in until the suspension ends.</p>` : '';
+  return page('Approve', `<h1>Let ${esc(u.display_name)} in?</h1>
+<p class="muted" style="margin-top:8px">They signed up and are waiting for approval. Once approved they can use Sproutly straight away and get a notification.</p>
+${personCard(u)}${suspended}
+<form method="post" action="/approve"><input type="hidden" name="t" value="${esc(token)}"><button type="submit" style="background:var(--mint)">Approve ${esc(u.display_name)}</button></form>
+<p class="muted" style="margin-top:16px">Don’t know them? Close this page: they stay on the waiting screen.</p>`);
+}
+
 /** Published child-safety (CSAE) standards, required by Google Play for social apps. */
 const CHILD_SAFETY_PAGE = page('Child safety standards', `
 <h1>Child Safety Standards</h1>
@@ -117,6 +148,33 @@ export async function webRoutes(app: FastifyInstance) {
   app.get('/delete-account', html(DELETE_PAGE));
   app.get('/delete-data', html(DELETE_DATA_PAGE));
   app.get('/child-safety', html(CHILD_SAFETY_PAGE));
+
+  // The approve form posts a normal HTML form; this parser only applies to routes in this file.
+  app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => {
+    done(null, Object.fromEntries(new URLSearchParams(typeof body === 'string' ? body : body.toString('utf8'))));
+  });
+  const noStore = (reply: FastifyReply) => reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').header('x-robots-tag', 'noindex');
+  // Opening the link only shows who it is: mail scanners and link previews open links by themselves.
+  app.get('/approve', async (req, reply) => {
+    const token = (req.query as { t?: string }).t;
+    const id = await verifyApproveLink(token);
+    if (!id) return noStore(reply).code(400).send(BAD_LINK);
+    const u = await loadPending(id);
+    return noStore(reply).send(u ? approvePage(u, token!) : GONE);
+  });
+  app.post('/approve', async (req, reply) => {
+    const token = (req.body as { t?: string } | undefined)?.t;
+    const id = await verifyApproveLink(token);
+    if (!id) return noStore(reply).code(400).send(BAD_LINK);
+    const result = await approveUser(id);
+    if (result === 'missing') return noStore(reply).code(404).send(GONE);
+    const u = await loadPending(id);
+    const name = u?.display_name ?? 'They';
+    req.log.info({ userId: id, result }, 'approved from email link');
+    return noStore(reply).send(result === 'already'
+      ? approveMessage('Already approved', `${name} could already use Sproutly.`, true)
+      : approveMessage('Approved', `${name} can use Sproutly now. They’ll get a notification saying they’re in.`, true));
+  });
 
   app.post('/v1/account/delete-by-code', async (req) => {
     const b = z.object({ phoneOrEmail: z.string().min(3).max(200), code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') }).parse(req.body);

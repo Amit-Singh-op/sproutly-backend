@@ -26,3 +26,6 @@ export async function getAppConfig(): Promise<AppConfig> {
   cached = { at: Date.now(), value };
   return value;
 }
+
+/** Test hook: read app_config again on the next call. */
+export const clearAppConfigCache = () => { cached = null; };

@@ -1,5 +1,7 @@
 import { config } from '../config.js';
 import { one } from '../db/pool.js';
+import { log } from '../lib/log.js';
+import { enqueue } from '../lib/queues.js';
 import { AppError } from '../lib/errors.js';
 import { redis } from '../lib/redis.js';
 import { getAppConfig } from './appConfig.js';
@@ -30,4 +32,25 @@ export async function requireApproved(userId: string) {
   if (!(await isApproved(userId))) {
     throw new AppError(403, 'APPROVAL_PENDING', 'Your account is waiting for approval.');
   }
+}
+
+/** Would this new account have to wait for approval? (Not the store-review account or a moderator.) */
+export async function needsApproval(login: string): Promise<boolean> {
+  if (!(await getAppConfig()).approvalRequired) return false;
+  const review = !!config.REVIEW_EMAIL && login === normalizeLogin(config.REVIEW_EMAIL);
+  return !review && !isAdminLogin(login);
+}
+
+/**
+ * Lets someone in: they can use the app straight away (the cached answer is dropped) and get a push saying so.
+ * 'already' if they were approved before, 'missing' if the account no longer exists.
+ */
+export async function approveUser(userId: string): Promise<'approved' | 'already' | 'missing'> {
+  const done = await one('UPDATE users SET approved = TRUE, approved_at = now() WHERE id = $1 AND NOT approved RETURNING id', [userId]);
+  if (!done) return (await one('SELECT 1 FROM users WHERE id = $1', [userId])) ? 'already' : 'missing';
+  await redis.del(key(userId)).catch(() => {});
+  enqueue.push(`approved:${userId}`, {
+    kind: 'social', userId, title: 'You’re in! 🌱', body: 'Your Sproutly account is approved. Come say hi to your sprout.', data: { type: 'approved' },
+  }).catch((err: unknown) => log.warn({ err: (err as Error).message }, 'approved push enqueue failed'));
+  return 'approved';
 }
